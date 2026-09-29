@@ -1,0 +1,17 @@
+[package]
+name = "cmbr"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Membership facade of cvld: register, passkeys, enrolment and pins per community member"
+license = "FSL-1.1-ALv2"
+repository = "https://github.com/corbet-libs/cmbr"
+readme = "README.md"
+publish = false
+include = ["Cargo.toml", "src/**", "README.md", "LICENSE.md"]
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"

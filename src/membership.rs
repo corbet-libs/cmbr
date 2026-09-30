@@ -66,15 +66,6 @@ pub enum Warning {
 
 struct SharedClock<C>(Arc<C>);
 impl<C: clbs::Clock> clbs::Clock for SharedClock<C> {
-    /// Durable revocation events for cmnt to forward to cplc before issuance.
-    pub async fn revocations(&self, limit: usize) -> Result<Vec<crate::Revocation>> {
-        self.storage.revocations(limit).await
-    }
-    /// Acknowledge only after the matching cplc epoch update and publication.
-    pub async fn acknowledge_revocation(&self, event: &crate::Revocation) -> Result<()> {
-        self.storage.acknowledge(event).await
-    }
-
     fn now(&self) -> clbs::Result<i64> {
         self.0.now()
     }
@@ -122,6 +113,15 @@ impl<
     C: clbs::Clock + 'static,
 > Membership<S, V, L, C>
 {
+    /// Durable revocation events for cmnt to forward to cplc before issuance.
+    pub async fn revocations(&self, limit: usize) -> Result<Vec<crate::Revocation>> {
+        self.storage.revocations(limit).await
+    }
+    /// Acknowledge only after the matching cplc epoch update and publication.
+    pub async fn acknowledge_revocation(&self, event: &crate::Revocation) -> Result<()> {
+        self.storage.acknowledge(event).await
+    }
+
     /// Construct from a migrated service-owned database and a multithreaded
     /// Tokio runtime. All leaves use the coordinator's immutable community.
     /// The service authenticates global pseudonyms before registration, supplies
@@ -767,6 +767,7 @@ impl<
                     .await?;
             }
         } else if !credentials.iter().any(|key| !key.is_revoked()) {
+            self.storage.signal_revocation(row.subject()).await?;
             return Ok(self.enrol.apply(&row, Event::AllPasskeysLost, now).await?);
         }
         if let clbs::State::Red(restrictions) =
@@ -792,6 +793,7 @@ impl<
             && let Some(member) = self.register.member(&row.member_id()).await?
             && member.handle.is_none()
         {
+            self.storage.signal_revocation(row.subject()).await?;
             row = self
                 .enrol
                 .apply(&row, Event::RegisterReleased(&member), now)
@@ -809,6 +811,7 @@ impl<
         {
             return Ok(row);
         }
+        self.storage.signal_revocation(row.subject()).await?;
         Ok(self.enrol.apply(&row, Event::AllPasskeysLost, now).await?)
     }
 }

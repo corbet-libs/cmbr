@@ -136,9 +136,10 @@ async fn different_members_log_in_and_read_lobbies_concurrently_without_writes()
         .unwrap();
     let before_a = m.enrol_store.load(USER).await.unwrap();
     let before_b = m.enrol_store.load(other).await.unwrap();
+    let snapshot = policy("a");
     let (a, b) = tokio::join!(
-        m.lobby_test(&a.authentication, &policy("a"), &[]),
-        m.lobby_test(&b.authentication, &policy("a"), &[])
+        m.lobby_test(&a.authentication, &snapshot, &[]),
+        m.lobby_test(&b.authentication, &snapshot, &[])
     );
     assert!(a.is_ok() && b.is_ok());
     assert_eq!(before_a, m.enrol_store.load(USER).await.unwrap());

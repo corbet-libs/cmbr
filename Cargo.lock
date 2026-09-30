@@ -995,7 +995,7 @@ dependencies = [
 [[package]]
 name = "cplc"
 version = "0.0.0"
-source = "git+https://github.com/corbet-libs/cplc?rev=8c91c9cce2736aa572df3ce4c50350d3ecd8683d#8c91c9cce2736aa572df3ce4c50350d3ecd8683d"
+source = "git+https://github.com/corbet-libs/cplc?rev=94f37d5fa58048645435d4c9f24c3fb5e817e8de#94f37d5fa58048645435d4c9f24c3fb5e817e8de"
 dependencies = [
  "cgts",
  "cpsd",

@@ -19,7 +19,7 @@ async fn complete_membership_round_trip() {
         .admit(
             &auth.authentication,
             &policy("a"),
-            &[proof.clone()],
+            std::slice::from_ref(&proof),
             handle(),
             lease(),
         )
@@ -31,7 +31,7 @@ async fn complete_membership_round_trip() {
             .admit(
                 &auth.authentication,
                 &policy("a"),
-                &[proof.clone()],
+                std::slice::from_ref(&proof),
                 handle(),
                 lease()
             )

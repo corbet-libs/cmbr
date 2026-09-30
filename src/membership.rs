@@ -540,7 +540,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                         .await?;
                     self.enrol.get(before.user(), now).await?;
                 } else {
-                    let receipt = self
+                    let result = self
                         .register
                         .reserve_handle(
                             crgs::Reservation {
@@ -550,10 +550,18 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                             },
                             date(now)?,
                         )
-                        .await?;
-                    self.enrol
-                        .apply(before, Event::HandleReserved(&receipt), now)
-                        .await?;
+                        .await;
+                    match result {
+                        Ok(receipt) => {
+                            self.enrol
+                                .apply(before, Event::HandleReserved(&receipt), now)
+                                .await?;
+                        }
+                        Err(crgs::Error::Storage) => return Err(Error::Unavailable),
+                        // A crash may follow a known register refusal before its
+                        // marker was cleared. No receipt exists in that case.
+                        Err(_) => {}
+                    }
                 }
             }
             Operation::Admission {

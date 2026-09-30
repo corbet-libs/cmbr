@@ -117,3 +117,28 @@ concurrent reads, cancelled cross-leaf work, storage/clock errors, revoked-sessi
 checks, no-return cases, probation and durable revocation tests. CI rejects
 floating or duplicated corbet dependency revisions. No Cargo runs locally.
 Optional Turso tests require an explicitly configured disposable database.
+
+Pins accept only `PinV2`, an explicitly versioned device submission carrying the
+community, pseudonym and field. The facade compares that context to the current
+authentication and requested field before storage. Raw fingerprints and version
+one submissions are refused. `PinV2::seal` is a device-side cpns v2 helper; values
+and salts never enter membership storage. A wire digest alone cannot prove its
+algorithm: cgrd authenticates the signed context and verifies the v2 opening,
+without v1 fallback. Tests cover storage through real signed cgrd verification,
+v1 rejection and every context substitution.
+
+The production membership constructor fixes the pin adapter to cgts's
+`PinSpendVerifier`; services cannot substitute a caller-written accepting
+verifier. `change_pin` binds the actual authenticated community/member, field,
+old digest/revision and v2 replacement before asking cgts for `SpentChange`.
+Only that opaque witness reaches cpns's atomic compare-and-exchange. The unproven
+cblc extension currently makes every such request fail closed; no token or pin
+mutation occurs. Tests repeat invalid evidence across facade restart and confirm
+the original revision/digest remain unchanged. Successful spend/replay tests
+remain blocked on the real cblc extension circuit, not replaced by a fake verifier.
+
+`begin_login` requires the credential ID saved by the wallet at registration.
+It uses cpky's uniform credential-first challenge for known, unknown and revoked
+keys. A bare UUID cannot reveal whether a person registered. The browser response
+is still verified by WebAuthn and the exact credential is rechecked on every
+subsequent authenticated call. Starting a login takes no write lock.

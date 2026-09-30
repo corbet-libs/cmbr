@@ -63,66 +63,61 @@ async fn complete_membership_round_trip() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn pins_require_exact_spent_binding_and_reject_replays() {
+async fn unproven_pin_spends_cannot_change_state_even_after_restart() {
     let (_dir, db) = temporary().await;
-    let facade = facade(&db, "a", Clock::new());
-    let (_, auth) = pending(&facade, "a").await;
+    let m = facade(&db, "a", Clock::new());
+    let (_, auth) = pending(&m, "a").await;
     let old_salt = cpns::Salt::from_bytes(vec![1; 32]).unwrap();
     let new_salt = cpns::Salt::from_bytes(vec![2; 32]).unwrap();
-    let original = cpns::fingerprint(b"synthetic-value", &old_salt);
-    let replacement = cpns::fingerprint(b"synthetic-value", &new_salt);
-    let pin = facade
-        .pin(&auth.authentication, "restricted", original)
-        .await
-        .unwrap();
-    assert_eq!(
-        facade
-            .pin(&auth.authentication, "restricted", original)
-            .await,
-        Err(Error::Pin)
-    );
-    let mut token = Spent {
-        community: "wrong".into(),
-        member: SUBJECT.into(),
-        field: "restricted".into(),
-        expected: pin,
-        replacement,
+    let context = cpns::FingerprintContext {
+        community: "a",
+        member: SUBJECT,
+        field: "restricted",
     };
-    assert_eq!(
-        facade
-            .change_pin(&auth.authentication, "restricted", pin, replacement, &token)
-            .await,
-        Err(Error::Pin)
-    );
-    token.community = "a".into();
-    let changed = facade
-        .change_pin(&auth.authentication, "restricted", pin, replacement, &token)
+    let original = cmbr::PinV2::seal(&context, b"synthetic-value", &old_salt);
+    let replacement = cmbr::PinV2::seal(&context, b"synthetic-value", &new_salt);
+    let pin = m
+        .pin(&auth.authentication, "restricted", &original)
         .await
         .unwrap();
-    assert_eq!(changed.revision, pin.revision + 1);
     assert_eq!(
-        facade
-            .change_pin(&auth.authentication, "restricted", pin, replacement, &token)
-            .await,
+        m.pin(&auth.authentication, "restricted", &original).await,
         Err(Error::Pin)
     );
+    for evidence in [b"unspent".as_slice(), b"signed-acceptance", b"replay"] {
+        assert!(matches!(
+            m.change_pin(
+                &auth.authentication,
+                "restricted",
+                pin,
+                &replacement,
+                evidence
+            )
+            .await,
+            Err(Error::ExtensionsUnavailable)
+        ));
+        assert_eq!(
+            m.get_pin(&auth.authentication, "restricted").await.unwrap(),
+            Some(pin)
+        );
+    }
+    drop(m);
+    let m = facade(&db, "a", Clock::new());
+    assert!(matches!(
+        m.change_pin(
+            &auth.authentication,
+            "restricted",
+            pin,
+            &replacement,
+            b"replay"
+        )
+        .await,
+        Err(Error::ExtensionsUnavailable)
+    ));
     assert_eq!(
-        facade
-            .get_pin(&auth.authentication, "restricted")
-            .await
-            .unwrap(),
-        Some(changed)
+        m.get_pin(&auth.authentication, "restricted").await.unwrap(),
+        Some(pin)
     );
-    assert!(cpns::check_opening(
-        &changed.fingerprint,
-        b"synthetic-value",
-        &new_salt
-    ));
-    assert!(!cpns::check_opening(
-        &changed.fingerprint,
-        b"synthetic-value",
-        &old_salt
-    ));
 }
 
 #[tokio::test(flavor = "multi_thread")]

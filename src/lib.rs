@@ -5,6 +5,8 @@
 #![forbid(unsafe_code)]
 
 mod membership;
+mod pins;
+pub use pins::PinV2;
 mod storage;
 
 pub use membership::{
@@ -55,7 +57,10 @@ pub enum Error {
     /// Pin creation or its spent change authorization was refused.
     #[error("pin operation refused")]
     Pin,
-    /// Another operation is running, or recovery requires a quiescent service.
+    /// The private change-token extension circuit has not been proven.
+    #[error("pin changes unavailable: extension proofs are not enabled")]
+    ExtensionsUnavailable,
+    /// Another writer changed the same member row.
     #[error("membership revision conflict; retry with current state")]
     Busy,
     /// Storage, task execution or verification infrastructure failed.

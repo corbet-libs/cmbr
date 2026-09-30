@@ -242,6 +242,34 @@ async fn revoked_authentication_cannot_change_pins_or_revoke_the_remaining_key()
             .iter()
             .any(|key| key.credential_id() == second.credential_id() && !key.is_revoked())
     );
+    let salt = cpns::Salt::from_bytes(vec![55; 32]).unwrap();
+    let pin = crate::PinV2::seal(
+        &cpns::FingerprintContext {
+            community: "a",
+            member: SUBJECT,
+            field: "age",
+        },
+        b"34",
+        &salt,
+    );
+    assert_eq!(
+        m.pin(&login.authentication, "age", &pin).await,
+        Err(Error::Passkey)
+    );
+    assert_eq!(
+        m.change_pin(
+            &login.authentication,
+            "age",
+            cpns::server::Pin {
+                fingerprint: pin.fingerprint(),
+                revision: 1
+            },
+            &pin,
+            b"unspent"
+        )
+        .await,
+        Err(Error::Passkey)
+    );
     assert_eq!(m.revocations(10).await.unwrap().len(), 1);
 }
 
@@ -379,4 +407,25 @@ async fn clock_and_storage_errors_leave_no_operation_lock() {
         .await
         .is_ok()
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn login_challenges_hide_membership_and_never_create_enrolment() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "a", Clock::new());
+    let (_, login) = pending(&m, "a").await;
+    let id = login.authentication.credential_id().clone();
+    let (known, _) = m.begin_login(USER, id.clone()).await.unwrap();
+    let unknown = Uuid::from_u128(987);
+    let (absent, _) = m.begin_login(unknown, id).await.unwrap();
+    let shape = |value: cpky::RequestChallengeResponse| {
+        let mut value = serde_json::to_value(value).unwrap();
+        value["publicKey"]
+            .as_object_mut()
+            .unwrap()
+            .remove("challenge");
+        value
+    };
+    assert_eq!(shape(known), shape(absent));
+    assert!(m.enrol_store.load(unknown).await.unwrap().is_none());
 }

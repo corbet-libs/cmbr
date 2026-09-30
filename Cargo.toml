@@ -11,13 +11,13 @@ publish = false
 include = ["Cargo.toml", "src/**", "docs/**", "README.md", "LICENSE.md"]
 
 [dependencies]
-cplc = { git = "https://github.com/corbet-libs/cplc", rev = "b255edaa532e51ef7124ad1b00e5526bd3eeba55" }
-cgts = { git = "https://github.com/corbet-libs/cgts", rev = "33066e3bea67cc130ffd84088e7342d3e2028c9b" }
+cplc = { git = "https://github.com/corbet-libs/cplc", rev = "13cd44168ff0bd333431a0b77e028d4e64d6ecd1" }
+cgts = { git = "https://github.com/corbet-libs/cgts", rev = "09f0c250f11f894a5ee25f21672aed972f21a4a1" }
 cgrd = { git = "https://github.com/corbet-foss/cgrd", rev = "947969cd38166f75914aa09256a6d2523990e0e4", default-features = false }
 crlt = { git = "https://github.com/corbet-foss/crlt", rev = "6b94dacd7fa04aa8847c62c6471a1fc5c0f6c9dc" }
 crgs = { git = "https://github.com/corbet-foss/crgs", rev = "b8f58b2bce71b5af5c97524fc4d709f669c43da1" }
-cpky = { git = "https://github.com/corbet-foss/cpky", rev = "2310e419020548d1de68e0aab7badc3772e847aa" }
-cnrl = { git = "https://github.com/corbet-foss/cnrl", rev = "98e62e23f198e4f988945a0cebd10d225b8c84d1" }
+cpky = { git = "https://github.com/corbet-foss/cpky", rev = "e0bea9b1a6425fe17b65257e747d2c4621078845" }
+cnrl = { git = "https://github.com/corbet-foss/cnrl", rev = "dd44fad14e36d2a43ce37cd6d76d323dc217a236" }
 cpns = { git = "https://github.com/corbet-foss/cpns", rev = "23968a9fa338791e70078c6070a6f1f3cf185ff7" }
 clbs = { git = "https://github.com/corbet-foss/clbs", rev = "2eeefb351484aadf430cd12083e0f198cde6a5b2" }
 crbk = { git = "https://github.com/corbet-foss/crbk", rev = "fe70dc61262a80dd7681da853acfdad290f3910c" }
@@ -28,6 +28,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["sync", "rt-multi-thread"] }
 
 [dev-dependencies]
+serde_cbor_2 = "0.13"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 webauthn-authenticator-rs = { version = "0.5.5", default-features = false, features = ["softtoken"] }

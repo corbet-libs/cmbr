@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use cgts::pins::PinSpendVerifier;
 use chrono::{DateTime, Datelike, Utc};
 use cpky::{Authentication, Uuid};
-use cpns::server::{ChangeTokenVerifier, Pin, Pins};
+use cpns::server::{Pin, Pins};
 
 use crate::{Error, Result, Storage};
 use cnrl::{Event, Record, State, Storage as _};
@@ -73,22 +74,22 @@ impl<C: clbs::Clock> clbs::Clock for SharedClock<C> {
 
 /// Membership service for one community. All leaf capabilities stay private.
 /// The coordinator must be shared by every writer to this community database.
-/// Supply real, fail-closed change-spend and self-ban verification adapters.
-pub struct Membership<S, V, L, C = clbs::SystemClock> {
+/// Pin changes use cgts's sealed spend adapter; supply a real self-ban verifier.
+pub struct Membership<S, L, C = clbs::SystemClock> {
     storage: Arc<S>,
     passkeys: Arc<cpky::Passkeys<cpky::LibsqlStore>>,
     enrol: Arc<cnrl::Enrol<cnrl::LibsqlStorage>>,
     enrol_store: cnrl::LibsqlStorage,
     register: Arc<crgs::Register<crgs::LibsqlStorage>>,
     register_store: crgs::LibsqlStorage,
-    pins: Arc<Pins<cpns::server::libsql::LibsqlStore, V>>,
+    pins: Arc<Pins<cpns::server::libsql::LibsqlStore, PinSpendVerifier>>,
     legal: Arc<clbs::Gate<clbs::LibsqlStore, L, SharedClock<C>>>,
     clock: Arc<C>,
     action: String,
     lease_months: u32,
 }
 
-impl<S, V, L, C> Clone for Membership<S, V, L, C> {
+impl<S, L, C> Clone for Membership<S, L, C> {
     fn clone(&self) -> Self {
         Self {
             storage: self.storage.clone(),
@@ -106,12 +107,8 @@ impl<S, V, L, C> Clone for Membership<S, V, L, C> {
     }
 }
 
-impl<
-    S: Storage + 'static,
-    V: ChangeTokenVerifier + 'static,
-    L: clbs::Verifier + 'static,
-    C: clbs::Clock + 'static,
-> Membership<S, V, L, C>
+impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static>
+    Membership<S, L, C>
 {
     /// Durable revocation events for cmnt to forward to cplc before issuance.
     pub async fn revocations(&self, limit: usize) -> Result<Vec<crate::Revocation>> {
@@ -126,14 +123,7 @@ impl<
     /// Tokio runtime. All leaves use the coordinator's immutable community.
     /// The service authenticates global pseudonyms before registration, supplies
     /// fresh verified policy/gate inputs, and authorizes restricted pin fields.
-    pub fn new(
-        db: &crlt::Db,
-        storage: S,
-        config: Config,
-        tokens: V,
-        legal: L,
-        clock: C,
-    ) -> Result<Self> {
+    pub fn new(db: &crlt::Db, storage: S, config: Config, legal: L, clock: C) -> Result<Self> {
         crate::text(storage.community())?;
         crate::text(&config.membership_action)?;
         if !(1..=24).contains(&config.lease_months) {
@@ -156,7 +146,7 @@ impl<
         let register = crgs::Register::new(register_store.clone(), config.release_period);
         let pins = Pins::new(
             cpns::server::libsql::LibsqlStore::new(db, community)?,
-            tokens,
+            PinSpendVerifier,
         );
         let clock = Arc::new(clock);
         let legal = clbs::Gate::new(
@@ -235,17 +225,18 @@ impl<
         .await
     }
 
-    /// Account-first login; discoverable login remains a cpky integration issue.
+    /// Private credential-first login. The wallet supplies its stored key ID;
+    /// unknown and revoked accounts receive the same browser challenge shape.
     pub async fn begin_login(
         &self,
         user: Uuid,
+        credential_id: cpky::CredentialID,
     ) -> Result<(cpky::RequestChallengeResponse, PendingLogin)> {
         async {
             self.now()?;
-            // cpky supplies the same coarse refusal for unknown or keyless users.
-
             let keys = self.passkeys.clone();
-            let (challenge, pending) = blocking(move || keys.start_authentication(user)).await?;
+            let (challenge, pending) =
+                blocking(move || keys.start_authentication_for(user, &credential_id)).await?;
             Ok((challenge, PendingLogin { user, pending }))
         }
         .await
@@ -368,6 +359,9 @@ impl<
     ) -> Result<Lobby> {
         let now = self.now()?;
         let row = self.authenticated(auth, now).await?;
+        if snapshot.settings().community != self.storage.community() {
+            return Err(Error::Identity);
+        }
         let decision = policy
             .may(
                 snapshot,
@@ -422,6 +416,9 @@ impl<
         let guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
         let now = self.now()?;
         let row = self.authenticated(auth, now).await?;
+        if snapshot.settings().community != self.storage.community() {
+            return Err(Error::Identity);
+        }
         let decision = policy
             .may(
                 snapshot,
@@ -537,11 +534,13 @@ impl<
         &self,
         auth: &Authentication,
         field: &str,
-        fingerprint: cpns::Fingerprint,
+        fingerprint: &crate::PinV2,
     ) -> Result<Pin> {
         let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
         async {
             let row = self.authenticated(auth, self.now()?).await?;
+            let fingerprint =
+                fingerprint.checked(self.storage.community(), row.subject(), field)?;
             Ok(self.pins.pin(row.subject(), field, fingerprint).await?)
         }
         .await
@@ -554,15 +553,31 @@ impl<
         auth: &Authentication,
         field: &str,
         expected: Pin,
-        replacement: cpns::Fingerprint,
-        token: &V::Token,
+        replacement: &crate::PinV2,
+        evidence: &[u8],
     ) -> Result<Pin> {
         let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
         async {
             let row = self.authenticated(auth, self.now()?).await?;
+            let replacement =
+                replacement.checked(self.storage.community(), row.subject(), field)?;
+            let change = cpns::server::Change {
+                community: self.storage.community(),
+                member: row.subject(),
+                field,
+                expected,
+                replacement,
+            };
+            let token =
+                cgts::pins::verify_encoded_pin_change(&change, evidence).map_err(|error| {
+                    match error {
+                        cgts::Error::ExtensionsUnavailable => Error::ExtensionsUnavailable,
+                        _ => Error::Pin,
+                    }
+                })?;
             Ok(self
                 .pins
-                .change(row.subject(), field, expected, replacement, token)
+                .change(row.subject(), field, expected, replacement, &token)
                 .await?)
         }
         .await
@@ -816,12 +831,8 @@ impl<
     }
 }
 
-impl<
-    S: Storage + 'static,
-    V: ChangeTokenVerifier + 'static,
-    L: clbs::Verifier + 'static,
-    C: clbs::Clock + 'static,
-> cplc::MembershipSource for Membership<S, V, L, C>
+impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static>
+    cplc::MembershipSource for Membership<S, L, C>
 {
     type Lease = tokio::sync::OwnedMutexGuard<()>;
     async fn membership(

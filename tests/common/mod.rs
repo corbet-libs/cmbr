@@ -10,7 +10,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use webauthn_authenticator_rs::{AuthenticatorBackend, softtoken::SoftToken};
 
 pub const USER: Uuid = Uuid::from_u128(1);
-pub const SUBJECT: &str = "community-pseudonym";
+pub const SUBJECT: &str = "010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101";
 pub const ORIGIN: &str = "https://members.example.org";
 pub const HANDLE: &str = "member_handle";
 
@@ -46,36 +46,6 @@ pub fn handle() -> crgs::Handle {
 }
 pub fn lease() -> crgs::YearMonth {
     crgs::YearMonth::new(2027, 9).unwrap()
-}
-
-// Test-only external authorization receipt. This fixture exercises exact cpns
-// binding; it is deliberately not a cblc proof or production spend adapter.
-pub struct Spent {
-    pub community: String,
-    pub member: String,
-    pub field: String,
-    pub expected: cpns::server::Pin,
-    pub replacement: cpns::Fingerprint,
-}
-pub struct Spends;
-impl cpns::server::ChangeTokenVerifier for Spends {
-    type Token = Spent;
-    async fn verify_spent(
-        &self,
-        change: &cpns::server::Change<'_>,
-        spent: &Spent,
-    ) -> Result<(), cpns::server::TokenRejected> {
-        if change.community == spent.community
-            && change.member == spent.member
-            && change.field == spent.field
-            && change.expected == spent.expected
-            && change.replacement == spent.replacement
-        {
-            Ok(())
-        } else {
-            Err(cpns::server::TokenRejected)
-        }
-    }
 }
 
 // A real signature fixture at the external clbs verifier seam. Production must
@@ -118,7 +88,7 @@ pub fn ban(community: &str) -> clbs::SignedOrder {
     clbs::SignedOrder { order, proof }
 }
 
-pub type Facade = cmbr::Membership<cmbr::LibsqlStorage, Spends, Verify, Clock>;
+pub type Facade = cmbr::Membership<cmbr::LibsqlStorage, Verify, Clock>;
 pub fn config() -> cmbr::Config {
     cmbr::Config {
         pending_days: 2,
@@ -134,7 +104,6 @@ pub fn facade(db: &crlt::Db, community: &str, clock: Clock) -> Facade {
         db,
         cmbr::LibsqlStorage::new(db, community).unwrap(),
         config(),
-        Spends,
         Verify,
         clock,
     )
@@ -182,7 +151,18 @@ pub async fn register(facade: &Facade, user: Uuid, subject: &str) -> SoftToken {
     device
 }
 pub async fn login(facade: &Facade, device: &mut SoftToken, user: Uuid) -> cmbr::Login {
-    let (challenge, pending) = facade.begin_login(user).await.unwrap();
+    // The software wallet retains IDs in its own fixture store, just as a real
+    // wallet retains the registration response. This does not read server state.
+    let cbor = serde_cbor_2::value::to_value(&*device).unwrap();
+    let serde_cbor_2::Value::Map(fields) = cbor else {
+        panic!("token map")
+    };
+    let tokens: std::collections::HashMap<Vec<u8>, Vec<u8>> = serde_cbor_2::value::from_value(
+        fields[&serde_cbor_2::Value::Text("tokens".into())].clone(),
+    )
+    .unwrap();
+    let id = tokens.keys().next().unwrap();
+    let (challenge, pending) = facade.begin_login(user, id.clone().into()).await.unwrap();
     let response = device
         .perform_auth(
             cpky::Url::parse(ORIGIN).unwrap(),

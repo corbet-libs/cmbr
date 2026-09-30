@@ -60,7 +60,7 @@ were read before integration. Exact revisions are in `Cargo.toml`.
 | [cpns](https://github.com/corbet-foss/cpns) | Reuse fingerprint types, insert-only pins and spent-token CAS. No hashing or token protocol in cmbr. |
 | [clbs](https://github.com/corbet-foss/clbs), [crbk](https://github.com/corbet-foss/crbk), [cgrd](https://github.com/corbet-foss/cgrd) | Reuse verified restrictions, policy evaluation, and validated Unicode handle skeletons. No substitute legal verifier, rule engine or handle checker. |
 | [crlt](https://github.com/corbet-foss/crlt), [official libsql](https://github.com/tursodatabase/libsql) | crlt main is ready. All persistence goes through its scoped immediate transactions and mandatory query-plan checks; no direct driver or ORM. |
-| [cblc](https://github.com/corbet-libs/cblc/blob/main/docs/EXTENSIONS.md) | Its extension contract leaves cpns authorization consumption and complete change-proof integration open. Use cpns's existing `ChangeTokenVerifier` seam. No production accepting adapter is supplied; a valid configured adapter is mandatory for changes. |
+| [cblc](https://github.com/corbet-libs/cblc/blob/main/docs/EXTENSIONS.md) | Its extension contract leaves cpns authorization consumption and complete change-proof integration open. cgts supplies a sealed fail-closed adapter; cmbr never accepts a caller-supplied spend verifier. |
 
 The selected leaves use LGPL-3.0-only with their linking exception. WebAuthn is
 MPL-2.0. Serde/serde_json, Tokio, chrono and thiserror provide encoding, scheduling,
@@ -73,7 +73,7 @@ No cryptographic primitive or leaf execution logic is reimplemented.
 GitHub Actions runs stable Rust formatting, strict all-target Clippy and real
 libSQL round trips. Tests exercise WebAuthn, state/resume, policy, pins, confirmed
 self-ban, isolation, failures, crashes, recovery and indexes. Coordination also
-runs against its memory implementation. External spent-token and self-ban verifier
+runs against its memory implementation. External self-ban verifier
 fixtures test the adapter contract, not production cblc proofs or device protocols.
 The development gate exists only in tests, with no production feature or provider.
 
@@ -83,7 +83,7 @@ are written. Credentials are never configured in source or public CI. The CI
 artifact retains the resolved lockfile; builds run only on GitHub Actions.
 Never publish this crate to a registry.
 
-Open: production spent-token and intent-bound self-ban verifier adapters; approved
+Open: proven cblc extension circuit and intent-bound self-ban verifier adapters; approved
 additional-device registration and session invalidation; discoverable login in
 cpky; full private balance extension proofs before activating change-token gates.
 No raw gate data, login dates, device names or request logs are stored. Dependency

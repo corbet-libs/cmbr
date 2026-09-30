@@ -121,7 +121,7 @@ async fn reservation_crash_resumes_or_cancels_at_the_fixed_deadline() {
             Operation::Reservation {
                 before: before.clone(),
                 display: HANDLE.into(),
-                skeleton: HANDLE.into(),
+                skeleton: handle().skeleton().into(),
             },
         )
         .await;
@@ -152,7 +152,10 @@ async fn reservation_crash_resumes_or_cancels_at_the_fixed_deadline() {
         if expire {
             assert!(
                 m.register
-                    .is_handle_available(HANDLE, date(before.expires_at().unwrap()).unwrap())
+                    .is_handle_available(
+                        handle().skeleton(),
+                        date(before.expires_at().unwrap()).unwrap()
+                    )
                     .await
                     .unwrap()
             );
@@ -170,7 +173,6 @@ async fn last_key_revocation_releases_but_preserves_committed_retention() {
         &login.authentication,
         &policy("a"),
         &[test_gate("a", SUBJECT)],
-        handle(),
         lease(),
     )
     .await
@@ -195,14 +197,19 @@ async fn last_key_revocation_releases_but_preserves_committed_retention() {
     assert_eq!(m.release(USER).await.unwrap().state(), State::Released);
     assert!(
         !m.register
-            .is_handle_available(HANDLE, date(now()).unwrap())
+            .is_handle_available(handle().skeleton(), date(now()).unwrap())
             .await
             .unwrap()
     );
     let end = "2029-10-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
     clock.set(end.timestamp());
     m.maintain(50).await.unwrap();
-    assert!(m.register.is_handle_available(HANDLE, end).await.unwrap());
+    assert!(
+        m.register
+            .is_handle_available(handle().skeleton(), end)
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -293,7 +300,6 @@ async fn renewal_cannot_resurrect_a_handle_due_for_release() {
         &login.authentication,
         &policy("a"),
         &[test_gate("a", SUBJECT)],
-        handle(),
         lease(),
     )
     .await
@@ -307,7 +313,6 @@ async fn renewal_cannot_resurrect_a_handle_due_for_release() {
             &login.authentication,
             &policy("a"),
             &[gate],
-            handle(),
             crgs::YearMonth::new(2030, 9).unwrap()
         )
         .await,
@@ -333,7 +338,7 @@ async fn recovery_after_register_refusal_preserves_the_other_owner() {
         Operation::Reservation {
             before: before.clone(),
             display: HANDLE.into(),
-            skeleton: HANDLE.into(),
+            skeleton: handle().skeleton().into(),
         },
     )
     .await;
@@ -348,8 +353,27 @@ async fn recovery_after_register_refusal_preserves_the_other_owner() {
     );
     assert!(
         !m.register
-            .is_handle_available(HANDLE, date(now()).unwrap())
+            .is_handle_available(handle().skeleton(), date(now()).unwrap())
             .await
             .unwrap()
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancellation_leaves_the_durable_slot_occupied() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "a", Clock::new());
+    let entered = tokio::sync::Notify::new();
+    let mut operation = Box::pin(m.run(async |_| {
+        entered.notify_one();
+        std::future::pending::<Result<()>>().await
+    }));
+    tokio::select! {
+        _ = entered.notified() => {}
+        _ = &mut operation => panic!("operation must remain pending"),
+    }
+    drop(operation);
+    assert_eq!(m.maintain(1).await, Err(Error::Busy));
+    m.recover_after_quiescence().await.unwrap();
+    m.maintain(1).await.unwrap();
 }

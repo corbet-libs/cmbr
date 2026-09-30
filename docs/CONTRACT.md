@@ -27,7 +27,10 @@ normally 24 months after the lease; self-ban does not immediately free them.
   UUID resolve to one stable pseudonym in cnrl.
 - `reserve_handle` validates with cgrd using the current trusted reserved list,
   reserves crgs's unique skeleton until exactly cnrl's deadline, then records
-  that receipt. No independent or sliding reservation lifetime exists.
+  that receipt. `handle` returns that canonical reservation or the active handle;
+  `member` returns the current register record for lease/role checks. Admission
+  reads the stored handle directly, so callers cannot substitute its skeleton.
+  No independent or sliding reservation lifetime exists.
 - `lobby` calls cnrl/crbk with verified proof metadata and current signed-policy
   content; returns current state and missing requirements, storing neither gates
   nor the verdict. `admit` reevaluates inside serialization, requires a positive
@@ -103,10 +106,12 @@ WebAuthn responses or accepts new admission from a stale policy decision.
 
 Reservation recovery replays the exact idempotent reservation while its deadline
 is live, or cancels that owner's reservation and expires cnrl after the deadline.
-Admission recovery reads crgs: absence means no admission to complete; presence
-supplies the durable receipt. The intent proves that the facade already obtained
+Admission recovery reads crgs: absence or a lease below the requested target
+means no completed admission/renewal; a matching record supplies the receipt. The intent proves that the facade already obtained
 a positive decision. For an interrupted pending admission it completes cnrl at
-`min(now, pending_deadline - 1)` so expiry cannot override a committed admission.
+`min(now, pending_deadline - 1, lease_month_start)` so expiry cannot override a
+committed admission, including recovery after the coarse lease has elapsed.
+For renewal there is no pending cutoff; the lease bound still applies.
 This logical reconciliation point is not stored as a timestamp and grants no
 current access. Current policy/legal/lease evaluation is required afterwards.
 A failed reconciliation leaves the intent intact and fails closed.

@@ -40,7 +40,10 @@ pub fn date(time: i64) -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::from_timestamp(time, 0).unwrap()
 }
 pub fn handle() -> crgs::Handle {
-    crgs::Handle::new(HANDLE, HANDLE).unwrap()
+    {
+        let checked = cmbr::cgrd::check_handle(HANDLE, &[]).unwrap();
+        crgs::Handle::new(checked.normalized, checked.skeleton).unwrap()
+    }
 }
 pub fn lease() -> crgs::YearMonth {
     crgs::YearMonth::new(2027, 9).unwrap()

@@ -6,6 +6,7 @@ use cpns::server::{ChangeTokenVerifier, Pin, Pins};
 
 use crate::{Checkpoint, Error, Result, Storage, storage::Operation};
 use cnrl::{Event, Record, State, Storage as _};
+use crgs::{Storage as _, Transaction as _};
 
 /// Resolved service configuration. No product policy defaults are supplied.
 pub struct Config {
@@ -57,6 +58,7 @@ pub struct Membership<S, V, L, C = clbs::SystemClock> {
     enrol: cnrl::Enrol<cnrl::LibsqlStorage>,
     enrol_store: cnrl::LibsqlStorage,
     register: crgs::Register<crgs::LibsqlStorage>,
+    register_store: crgs::LibsqlStorage,
     pins: Pins<cpns::server::libsql::LibsqlStore, V>,
     legal: clbs::Gate<clbs::LibsqlStore, L, SharedClock<C>>,
     clock: Arc<C>,
@@ -91,10 +93,8 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
             enrol_store.clone(),
             cnrl::Config::new(config.pending_days, &config.membership_action)?,
         );
-        let register = crgs::Register::new(
-            crgs::LibsqlStorage::new(db.community(community)?),
-            config.release_period,
-        );
+        let register_store = crgs::LibsqlStorage::new(db.community(community)?);
+        let register = crgs::Register::new(register_store.clone(), config.release_period);
         let pins = Pins::new(
             cpns::server::libsql::LibsqlStore::new(db, community)?,
             tokens,
@@ -111,6 +111,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
             enrol,
             enrol_store,
             register,
+            register_store,
             pins,
             legal,
             clock,
@@ -284,13 +285,12 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
 
     /// Admit or renew only after a fresh positive rulebook decision and clbs check.
     /// Roles start as Member; role administration belongs to the owning service.
-    /// `handle` is the already reserved normalized handle, not a new selection.
+    /// Uses the stored reservation/handle; callers cannot substitute a skeleton.
     pub async fn admit(
         &self,
         auth: &Authentication,
         policy: &crbk::Snapshot,
         gates: &[crbk::GateResult],
-        handle: crgs::Handle,
         lease: crgs::YearMonth,
     ) -> Result<Record> {
         self.run(async |checkpoint| {
@@ -305,16 +305,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
             if lease < current_month {
                 return Err(Error::InvalidInput);
             }
-            if matches!(row.state(), State::Admitted | State::Lapsed) {
-                let member = self
-                    .register
-                    .member(&row.member_id())
-                    .await?
-                    .ok_or(Error::Transition)?;
-                if member.handle.as_ref() != Some(&handle) {
-                    return Err(Error::Identity);
-                }
-            }
+            let handle = self.current_handle(&row).await?.ok_or(Error::Transition)?;
             self.prepare(
                 checkpoint,
                 Operation::Admission {
@@ -438,6 +429,15 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         self.run(async |_| {
             let row = self.authenticated(auth, self.now()?).await?;
             Ok(self.register.member(&row.member_id()).await?)
+        })
+        .await
+    }
+
+    /// Return the canonical reserved or admitted handle for the lobby.
+    pub async fn handle(&self, auth: &Authentication) -> Result<Option<crgs::Handle>> {
+        self.run(async |_| {
+            let row = self.authenticated(auth, self.now()?).await?;
+            self.current_handle(&row).await
         })
         .await
     }
@@ -646,6 +646,19 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
     async fn credentials(&self, user: Uuid) -> Result<Vec<cpky::StoredPasskey>> {
         let keys = self.passkeys.clone();
         blocking(move || keys.list(user)).await
+    }
+    async fn current_handle(&self, row: &Record) -> Result<Option<crgs::Handle>> {
+        if matches!(row.state(), State::Admitted | State::Lapsed) {
+            return Ok(self
+                .register
+                .member(&row.member_id())
+                .await?
+                .and_then(|member| member.handle));
+        }
+        let mut tx = self.register_store.begin().await?;
+        let reservation = tx.reservation(&row.member_id()).await?;
+        tx.commit().await?;
+        Ok(reservation.map(|reservation| reservation.handle))
     }
     async fn unrestricted(&self, subject: &str) -> Result<()> {
         match self.legal.check_action(subject, &self.action).await? {

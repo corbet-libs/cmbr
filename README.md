@@ -4,7 +4,7 @@ Community membership facade under `cvld → cmnt`, composing the finished Rust
 leaves. Native server library, FSL-1.1-ALv2; interfaces are experimental.
 
 `Membership` exposes first passkey registration, account-first login, authenticated
-resume/lobby, handle reservation, admission/renewal, lapse, pins and authorized
+resume/lobby, handle reservation/lookup, register lookup, admission/renewal, lapse, pins and authorized
 pin changes, passkey revocation, lost-key release, self-ban, and bounded maintenance.
 It delegates execution to `cpky`, `crgs`, `cnrl`, `cpns`, `clbs`, `crbk` and `cgrd`.
 See [the implemented contract](docs/CONTRACT.md) before embedding it.

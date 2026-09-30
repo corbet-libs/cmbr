@@ -12,7 +12,7 @@ async fn complete_membership_round_trip() {
     let proof = test_gate("a", SUBJECT);
     assert_eq!(
         facade
-            .admit(&auth.authentication, &policy("a"), &[], handle(), lease())
+            .admit(&auth.authentication, &policy("a"), &[], lease())
             .await,
         Err(Error::Policy)
     );
@@ -21,7 +21,6 @@ async fn complete_membership_round_trip() {
             &auth.authentication,
             &policy("a"),
             std::slice::from_ref(&proof),
-            handle(),
             lease(),
         )
         .await
@@ -33,7 +32,6 @@ async fn complete_membership_round_trip() {
                 &auth.authentication,
                 &policy("a"),
                 std::slice::from_ref(&proof),
-                handle(),
                 lease()
             )
             .await
@@ -53,13 +51,7 @@ async fn complete_membership_round_trip() {
     );
     assert_eq!(
         facade
-            .admit(
-                &next.authentication,
-                &policy("a"),
-                &[proof],
-                handle(),
-                lease()
-            )
+            .admit(&next.authentication, &policy("a"), &[proof], lease())
             .await
             .unwrap()
             .state(),

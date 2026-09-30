@@ -301,3 +301,31 @@ async fn unverified_registration_and_wrong_instance_do_not_write_passkeys() {
         State::Started
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn handle_availability_and_exact_session_revocation_use_real_leaves() {
+    let (_dir, db) = temporary().await;
+    let a = facade(&db, "a", Clock::new());
+    let b = facade(&db, "b", Clock::new());
+    assert!(a.is_handle_available(HANDLE, &[]).await.unwrap());
+    assert!(a.is_handle_available("tiny", &[]).await.is_err());
+    assert!(
+        a.is_handle_available(HANDLE, &[HANDLE.into()])
+            .await
+            .is_err()
+    );
+    let (_, auth) = pending(&a, "a").await;
+    assert!(!a.is_handle_available(HANDLE, &[]).await.unwrap());
+    assert!(b.is_handle_available(HANDLE, &[]).await.unwrap());
+    let unknown: cpky::CredentialID = vec![0; 32].into();
+    assert!(
+        !a.session_is_active(&auth.authentication, &unknown)
+            .await
+            .unwrap()
+    );
+    assert!(
+        b.session_is_active(&auth.authentication, &unknown)
+            .await
+            .is_err()
+    );
+}

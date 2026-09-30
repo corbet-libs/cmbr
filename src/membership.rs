@@ -223,6 +223,37 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
             .await
     }
 
+    /// Validate a candidate and check the actual register's reservation/lease state.
+    /// Callers must throttle this unauthenticated lookup and supply current reserved names.
+    pub async fn is_handle_available(&self, handle: &str, reserved: &[String]) -> Result<bool> {
+        let checked = cgrd::check_handle(handle, reserved).map_err(|_| Error::InvalidInput)?;
+        self.run(async |_| {
+            Ok(self
+                .register
+                .is_handle_available(&checked.skeleton, date(self.now()?)?)
+                .await?)
+        })
+        .await
+    }
+
+    /// Revalidate a session's exact credential, including immediate revocation.
+    /// An opaque cpky authentication alone is not a renewable bearer capability.
+    pub async fn session_is_active(
+        &self,
+        auth: &Authentication,
+        credential: &cpky::CredentialID,
+    ) -> Result<bool> {
+        self.run(async |_| {
+            self.authenticated(auth, self.now()?).await?;
+            Ok(self
+                .credentials(auth.member())
+                .await?
+                .iter()
+                .any(|key| key.credential_id() == credential && !key.is_revoked()))
+        })
+        .await
+    }
+
     /// Normalize and validate with cgrd, then reserve its skeleton through crgs.
     /// The reserved-name list must come from authenticated, current policy.
     pub async fn reserve_handle(

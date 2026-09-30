@@ -144,3 +144,11 @@ Turso tests run only with both environment variables set, against disposable dat
 public CI receives neither. All Cargo checks run on GitHub Actions; no registry
 publication. Production cblc-to-cpns spend binding and the approved additional-device
 and fresh self-ban protocols remain explicit integration boundaries.
+
+## Door queries
+
+`is_handle_available` applies the existing guard and register reservation/lease
+rules without exposing an owner. Throttle it before calling. `session_is_active`
+revalidates the exact credential behind an opaque authentication receipt; revoking
+that credential invalidates its sessions even if another passkey remains active.
+Both operations use the existing facade coordinator and fixed community scope.

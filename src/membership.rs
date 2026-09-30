@@ -549,13 +549,14 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                     .await?
                     .ok_or(Error::Unavailable)?;
                 self.check_record(&before)?;
-                let deadline = before.expires_at().ok_or(Error::Unavailable)?;
-                if now >= deadline {
+                let deadline = before.expires_at();
+                if before.state().is_terminal() || deadline.is_some_and(|end| now >= end) {
                     self.register
                         .cancel_reservation(&before.member_id(), skeleton)
                         .await?;
                     self.enrol.get(before.user(), now).await?;
                 } else {
+                    let deadline = deadline.ok_or(Error::Unavailable)?;
                     let result = self
                         .register
                         .reserve_handle(
@@ -591,7 +592,8 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                     .await?
                     .ok_or(Error::Unavailable)?;
                 self.check_record(&before)?;
-                if let Some(member) = self.register.member(&before.member_id()).await?
+                if !before.state().is_terminal()
+                    && let Some(member) = self.register.member(&before.member_id()).await?
                     && member.lease_end >= crgs::YearMonth::new(*lease_year, *lease_month)?
                 {
                     // This marker is written only after a verified positive policy

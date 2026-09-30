@@ -141,6 +141,19 @@ async fn reservation_crash_resumes_or_cancels_at_the_fixed_deadline() {
         }
         m.recover_after_quiescence().await.unwrap();
         let row = m.enrolment_state(USER).await.unwrap();
+        // Simulate another crash after the recovery phase committed but before
+        // its operation marker was cleared. Recovery itself must be resumable.
+        occupy(
+            &m,
+            Operation::Reservation {
+                user: before.user(),
+                display: HANDLE.into(),
+                skeleton: handle().skeleton().into(),
+            },
+        )
+        .await;
+        m.recover_after_quiescence().await.unwrap();
+        assert_eq!(m.enrolment_state(USER).await.unwrap(), row);
         assert_eq!(
             row.state(),
             if expire {

@@ -142,3 +142,9 @@ It uses cpky's uniform credential-first challenge for known, unknown and revoked
 keys. A bare UUID cannot reveal whether a person registered. The browser response
 is still verified by WebAuthn and the exact credential is rechecked on every
 subsequent authenticated call. Starting a login takes no write lock.
+
+Legal orders retain their authority-signed start/end precision in clbs: rounding
+would alter when the order legally applies and invalidate its authenticated
+payload. These are authorization intervals, not member activity records.
+WebAuthn ceremony timeouts are short-lived protocol state. Probation, registration
+expiry, leases and signed community credentials retain their coarse time rules.

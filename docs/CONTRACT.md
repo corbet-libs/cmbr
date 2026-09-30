@@ -148,3 +148,7 @@ would alter when the order legally applies and invalidate its authenticated
 payload. These are authorization intervals, not member activity records.
 WebAuthn ceremony timeouts are short-lived protocol state. Probation, registration
 expiry, leases and signed community credentials retain their coarse time rules.
+
+An explicit admitted-to-lapsed transition queues its generation-tagged revocation
+before committing the lifecycle change. Repeated lapse does not create a second
+event. The cmnt relay publishes the epoch before acknowledging that event.

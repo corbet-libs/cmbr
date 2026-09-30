@@ -429,3 +429,37 @@ async fn login_challenges_hide_membership_and_never_create_enrolment() {
     assert_eq!(shape(known), shape(absent));
     assert!(m.enrol_store.load(unknown).await.unwrap().is_none());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn explicit_lapse_queues_durable_revocation_before_readmission() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "lapse-event", Clock::new());
+    let (_, login) = pending(&m, "lapse-event").await;
+    let mut policy = verified_policy(&policy("lapse-event"), now()).await;
+    let snapshot = policy.verified_settings(now() as u64).await.unwrap();
+    let green = checked(
+        &snapshot,
+        SUBJECT,
+        &[test_gate("lapse-event", SUBJECT)],
+        now(),
+    )
+    .await;
+    m.admit(&login.authentication, &policy, &snapshot, &green, lease())
+        .await
+        .unwrap();
+    assert!(m.revocations(10).await.unwrap().is_empty());
+    let red = checked(&snapshot, SUBJECT, &[], now()).await;
+    let row = m
+        .lapse(&login.authentication, &policy, &snapshot, &red)
+        .await
+        .unwrap();
+    assert_eq!(row.state(), State::Lapsed);
+    let events = m.revocations(10).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].member, SUBJECT);
+    assert!(m.storage.revocation_pending(SUBJECT).await.unwrap());
+    m.lapse(&login.authentication, &policy, &snapshot, &red)
+        .await
+        .unwrap();
+    assert_eq!(m.revocations(10).await.unwrap(), events);
+}

@@ -518,6 +518,13 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
         if lobby.decision.allowed {
             return Err(Error::Policy);
         }
+        // Queue before the lifecycle commit: an ambiguous failure must never
+        // leave an already-issued credential without an invalidation event.
+        if lobby.enrolment.state() == State::Admitted {
+            self.storage
+                .signal_revocation(lobby.enrolment.subject())
+                .await?;
+        }
         Ok(self
             .enrol
             .apply(

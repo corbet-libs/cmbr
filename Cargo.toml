@@ -8,9 +8,28 @@ license = "FSL-1.1-ALv2"
 repository = "https://github.com/corbet-libs/cmbr"
 readme = "README.md"
 publish = false
-include = ["Cargo.toml", "src/**", "README.md", "LICENSE.md"]
+include = ["Cargo.toml", "src/**", "docs/**", "README.md", "LICENSE.md"]
 
 [dependencies]
+cgrd = { git = "https://github.com/corbet-foss/cgrd", rev = "ca8783f3bb114d055987fd44d86628197ecc845d", default-features = false }
+crlt = { git = "https://github.com/corbet-foss/crlt", rev = "6b94dacd7fa04aa8847c62c6471a1fc5c0f6c9dc" }
+crgs = { git = "https://github.com/corbet-foss/crgs", rev = "baeff343ae3b675115ec8869dbb6c0ce7d6ab8bd" }
+cpky = { git = "https://github.com/corbet-foss/cpky", rev = "ae52e4dbf9c7aa954991927e9ece9f70c81ac5ff" }
+cnrl = { git = "https://github.com/corbet-foss/cnrl", rev = "f1f74d076b19adf302174ce6297734895f9b6ec8" }
+cpns = { git = "https://github.com/corbet-foss/cpns", rev = "23968a9fa338791e70078c6070a6f1f3cf185ff7" }
+clbs = { git = "https://github.com/corbet-foss/clbs", rev = "2eeefb351484aadf430cd12083e0f198cde6a5b2" }
+crbk = { git = "https://github.com/corbet-foss/crbk", rev = "0eff64915dbeab0a725a8b1c0ad9061ae7d83976" }
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "rt-multi-thread"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+webauthn-authenticator-rs = { version = "0.5.5", default-features = false, features = ["softtoken"] }
+ed25519-dalek = "2.2"
 
 [lints.rust]
 unsafe_code = "forbid"

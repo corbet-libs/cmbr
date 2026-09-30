@@ -56,12 +56,12 @@ pub(crate) enum Operation {
     // Single-leaf writes can be reconciled from their current state.
     Busy,
     Reservation {
-        before: cnrl::Record,
+        user: cpky::Uuid,
         display: String,
         skeleton: String,
     },
     Admission {
-        before: cnrl::Record,
+        user: cpky::Uuid,
         lease_year: u16,
         lease_month: u8,
     },

@@ -89,7 +89,9 @@ that exact slot; literal insertion scans nothing. crlt enforces all query plans.
 
 Every operation first commits an occupied slot. It holds no timestamp, timer,
 request ID or idle member identity. Reservation/admission operations replace it
-with a minimal intent and the previous cnrl snapshot before touching crgs. This
+with a minimal intent and user reference before touching crgs. Admission intents
+also retain the requested coarse lease. Recovery loads cnrl's validated current
+record instead of persisting or trusting a duplicate lifecycle snapshot. This
 is current unfinished work, removed on completion, not a request/event ledger.
 It prevents cnrl expiry or release from racing a committed register operation
 whose receipt has not reached cnrl. Known register refusals clear their intent;

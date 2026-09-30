@@ -31,7 +31,7 @@ async fn admission_crash_is_reconciled_before_pending_expiry_after_reopen() {
     occupy(
         &m,
         Operation::Admission {
-            before: before.clone(),
+            user: before.user(),
             lease_year: lease().year(),
             lease_month: lease().month(),
         },
@@ -87,7 +87,7 @@ async fn uncommitted_admission_never_creates_a_member_during_recovery() {
     occupy(
         &m,
         Operation::Admission {
-            before: before.clone(),
+            user: before.user(),
             lease_year: lease().year(),
             lease_month: lease().month(),
         },
@@ -119,7 +119,7 @@ async fn reservation_crash_resumes_or_cancels_at_the_fixed_deadline() {
         occupy(
             &m,
             Operation::Reservation {
-                before: before.clone(),
+                user: before.user(),
                 display: HANDLE.into(),
                 skeleton: handle().skeleton().into(),
             },
@@ -336,7 +336,7 @@ async fn recovery_after_register_refusal_preserves_the_other_owner() {
     occupy(
         &m,
         Operation::Reservation {
-            before: before.clone(),
+            user: before.user(),
             display: HANDLE.into(),
             skeleton: handle().skeleton().into(),
         },
@@ -376,4 +376,21 @@ async fn cancellation_leaves_the_durable_slot_occupied() {
     assert_eq!(m.maintain(1).await, Err(Error::Busy));
     m.recover_after_quiescence().await.unwrap();
     m.maintain(1).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recovery_fails_closed_for_a_missing_identity() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "a", Clock::new());
+    occupy(
+        &m,
+        Operation::Admission {
+            user: Uuid::nil(),
+            lease_year: 2027,
+            lease_month: 9,
+        },
+    )
+    .await;
+    assert_eq!(m.recover_after_quiescence().await, Err(Error::Unavailable));
+    assert!(m.storage.load().await.unwrap().is_busy());
 }

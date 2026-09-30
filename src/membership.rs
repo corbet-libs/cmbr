@@ -249,7 +249,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
             self.prepare(
                 checkpoint,
                 Operation::Reservation {
-                    before: row.clone(),
+                    user: row.user(),
                     display: checked.normalized,
                     skeleton: checked.skeleton,
                 },
@@ -309,7 +309,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
             self.prepare(
                 checkpoint,
                 Operation::Admission {
-                    before: row.clone(),
+                    user: row.user(),
                     lease_year: lease.year(),
                     lease_month: lease.month(),
                 },
@@ -539,11 +539,16 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         match operation {
             Operation::Busy => {}
             Operation::Reservation {
-                before,
+                user,
                 display,
                 skeleton,
             } => {
-                self.check_record(before)?;
+                let before = self
+                    .enrol_store
+                    .load(*user)
+                    .await?
+                    .ok_or(Error::Unavailable)?;
+                self.check_record(&before)?;
                 let deadline = before.expires_at().ok_or(Error::Unavailable)?;
                 if now >= deadline {
                     self.register
@@ -565,7 +570,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                     match result {
                         Ok(receipt) => {
                             self.enrol
-                                .apply(before, Event::HandleReserved(&receipt), now)
+                                .apply(&before, Event::HandleReserved(&receipt), now)
                                 .await?;
                         }
                         Err(crgs::Error::Storage) => return Err(Error::Unavailable),
@@ -576,11 +581,16 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                 }
             }
             Operation::Admission {
-                before,
+                user,
                 lease_year,
                 lease_month,
             } => {
-                self.check_record(before)?;
+                let before = self
+                    .enrol_store
+                    .load(*user)
+                    .await?
+                    .ok_or(Error::Unavailable)?;
+                self.check_record(&before)?;
                 if let Some(member) = self.register.member(&before.member_id()).await?
                     && member.lease_end >= crgs::YearMonth::new(*lease_year, *lease_month)?
                 {
@@ -604,7 +614,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                     };
                     self.enrol
                         .apply(
-                            before,
+                            &before,
                             if member.handle.is_none() {
                                 Event::RegisterReleased(&member)
                             } else {

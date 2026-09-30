@@ -282,3 +282,74 @@ async fn corrupt_storage_fails_closed_without_echoing_sensitive_data() {
     assert_eq!(error, Error::Unavailable);
     assert!(!format!("{error:?} {error}").contains("sensitive-invalid-json"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn renewal_cannot_resurrect_a_handle_due_for_release() {
+    let (_dir, db) = temporary().await;
+    let clock = Clock::new();
+    let m = facade(&db, "a", clock.clone());
+    let (_, login) = pending(&m, "a").await;
+    m.admit(
+        &login.authentication,
+        &policy("a"),
+        &[test_gate("a", SUBJECT)],
+        handle(),
+        lease(),
+    )
+    .await
+    .unwrap();
+    let late = "2029-10-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+    clock.set(late.timestamp());
+    let mut gate = test_gate("a", SUBJECT);
+    gate.valid_until = late.timestamp() + 3600;
+    assert_eq!(
+        m.admit(
+            &login.authentication,
+            &policy("a"),
+            &[gate],
+            handle(),
+            crgs::YearMonth::new(2030, 9).unwrap()
+        )
+        .await,
+        Err(Error::Transition)
+    );
+    assert_eq!(
+        m.enrolment_state(USER).await.unwrap().state(),
+        State::Released
+    );
+    assert!(!m.storage.load().await.unwrap().is_busy());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recovery_after_register_refusal_preserves_the_other_owner() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "a", Clock::new());
+    let (_, owner) = pending(&m, "a").await;
+    let second_user = Uuid::from_u128(2);
+    register(&m, second_user, "second-subject").await;
+    let before = m.enrolment_state(second_user).await.unwrap();
+    occupy(
+        &m,
+        Operation::Reservation {
+            before: before.clone(),
+            display: HANDLE.into(),
+            skeleton: HANDLE.into(),
+        },
+    )
+    .await;
+    m.recover_after_quiescence().await.unwrap();
+    assert_eq!(
+        m.enrolment_state(second_user).await.unwrap().state(),
+        State::PasskeyRegistered
+    );
+    assert_eq!(
+        m.resume(&owner.authentication).await.unwrap().state(),
+        State::GatesInProgress
+    );
+    assert!(
+        !m.register
+            .is_handle_available(HANDLE, date(now()).unwrap())
+            .await
+            .unwrap()
+    );
+}

@@ -1,3 +1,4 @@
+//! Optional round trip against a caller-supplied disposable Turso database.
 mod common;
 
 #[tokio::test(flavor = "multi_thread")]

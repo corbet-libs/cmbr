@@ -352,10 +352,11 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                 }
             };
             if member.handle.is_none() {
-                return Ok(self
-                    .enrol
+                self.enrol
                     .apply(&row, Event::RegisterReleased(&member), now)
-                    .await?);
+                    .await?;
+                self.prepare(checkpoint, Operation::Busy).await?;
+                return Err(Error::Transition);
             }
             Ok(self
                 .enrol
@@ -427,6 +428,16 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         self.run(async |_| {
             let row = self.authenticated(auth, self.now()?).await?;
             Ok(self.pins.get(row.subject(), field).await?)
+        })
+        .await
+    }
+
+    /// Read the current register record for credential issuance or the lobby.
+    /// The outer service must validate the coarse lease before granting access.
+    pub async fn member(&self, auth: &Authentication) -> Result<Option<crgs::Member>> {
+        self.run(async |_| {
+            let row = self.authenticated(auth, self.now()?).await?;
+            Ok(self.register.member(&row.member_id()).await?)
         })
         .await
     }

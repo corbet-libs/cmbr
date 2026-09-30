@@ -1,3 +1,4 @@
+//! Real WebAuthn, register, enrolment, pin and self-ban integration tests.
 mod common;
 use cmbr::{Error, Storage, cnrl::State, cpky, cpns};
 use common::*;

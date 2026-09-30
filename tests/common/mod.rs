@@ -142,7 +142,7 @@ pub async fn open(url: &str, token: &str) -> crlt::Db {
     let migrations: Vec<_> = cmbr::SCHEMAS
         .iter()
         .enumerate()
-        .map(|(i, (name, sql))| crlt::Migration::new(i as u32 + 1, *name, *sql))
+        .map(|(i, (name, sql))| crlt::Migration::new(i as u32 + 1, name, sql))
         .collect();
     db.migrate(&migrations).await.unwrap();
     db

@@ -11,14 +11,16 @@ publish = false
 include = ["Cargo.toml", "src/**", "docs/**", "README.md", "LICENSE.md"]
 
 [dependencies]
-cgrd = { git = "https://github.com/corbet-foss/cgrd", rev = "ca8783f3bb114d055987fd44d86628197ecc845d", default-features = false }
+cplc = { git = "https://github.com/corbet-libs/cplc", rev = "b255edaa532e51ef7124ad1b00e5526bd3eeba55" }
+cgts = { git = "https://github.com/corbet-libs/cgts", rev = "33066e3bea67cc130ffd84088e7342d3e2028c9b" }
+cgrd = { git = "https://github.com/corbet-foss/cgrd", rev = "947969cd38166f75914aa09256a6d2523990e0e4", default-features = false }
 crlt = { git = "https://github.com/corbet-foss/crlt", rev = "6b94dacd7fa04aa8847c62c6471a1fc5c0f6c9dc" }
-crgs = { git = "https://github.com/corbet-foss/crgs", rev = "baeff343ae3b675115ec8869dbb6c0ce7d6ab8bd" }
-cpky = { git = "https://github.com/corbet-foss/cpky", rev = "ae52e4dbf9c7aa954991927e9ece9f70c81ac5ff" }
-cnrl = { git = "https://github.com/corbet-foss/cnrl", rev = "f1f74d076b19adf302174ce6297734895f9b6ec8" }
+crgs = { git = "https://github.com/corbet-foss/crgs", rev = "b8f58b2bce71b5af5c97524fc4d709f669c43da1" }
+cpky = { git = "https://github.com/corbet-foss/cpky", rev = "2310e419020548d1de68e0aab7badc3772e847aa" }
+cnrl = { git = "https://github.com/corbet-foss/cnrl", rev = "98e62e23f198e4f988945a0cebd10d225b8c84d1" }
 cpns = { git = "https://github.com/corbet-foss/cpns", rev = "23968a9fa338791e70078c6070a6f1f3cf185ff7" }
 clbs = { git = "https://github.com/corbet-foss/clbs", rev = "2eeefb351484aadf430cd12083e0f198cde6a5b2" }
-crbk = { git = "https://github.com/corbet-foss/crbk", rev = "0eff64915dbeab0a725a8b1c0ad9061ae7d83976" }
+crbk = { git = "https://github.com/corbet-foss/crbk", rev = "fe70dc61262a80dd7681da853acfdad290f3910c" }
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -27,10 +29,13 @@ tokio = { version = "1", features = ["sync", "rt-multi-thread"] }
 
 [dev-dependencies]
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 webauthn-authenticator-rs = { version = "0.5.5", default-features = false, features = ["softtoken"] }
 ed25519-dalek = "2.2"
 
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
+
+[profile.dev.package."*"]
+opt-level = 3

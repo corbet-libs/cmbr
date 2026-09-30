@@ -1,180 +1,9 @@
-use super::*;
+use super::{DateTime, Error, State, Utc, Uuid, Warning, blocking, date};
+use cnrl::Storage as _;
 #[path = "../../tests/common/mod.rs"]
 mod common;
-use common::{
-    Clock, Facade, HANDLE, ORIGIN, SUBJECT, USER, facade, handle, lease, login, now, open, pending,
-    policy, register, temporary, test_gate,
-};
-
-async fn occupy(facade: &Facade, operation: Operation) -> Checkpoint {
-    let idle = facade.storage.load().await.unwrap();
-    let next = idle.next(Some(operation)).unwrap();
-    facade.storage.compare_exchange(&idle, &next).await.unwrap();
-    next
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn admission_crash_is_reconciled_before_pending_expiry_after_reopen() {
-    let (dir, db) = temporary().await;
-    let clock = Clock::new();
-    let m = facade(&db, "a", clock.clone());
-    let (_, login) = pending(&m, "a").await;
-    let (before, verdict) = m
-        .lobby(
-            &login.authentication,
-            &policy("a"),
-            &[test_gate("a", SUBJECT)],
-        )
-        .await
-        .unwrap();
-    assert!(verdict.allowed);
-    occupy(
-        &m,
-        Operation::Admission {
-            user: before.user(),
-            lease_year: lease().year(),
-            lease_month: lease().month(),
-        },
-    )
-    .await;
-    // The actual leaf transaction commits. Simulate process loss before its cnrl receipt.
-    m.register
-        .admit(
-            crgs::Admission {
-                id: before.member_id(),
-                handle: handle(),
-                role: crgs::Role::Member,
-                lease_end: lease(),
-            },
-            date(now()).unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(m.maintain(10).await, Err(Error::Busy));
-    assert_eq!(m.enrolment_state(USER).await, Err(Error::Busy));
-    clock.set(before.expires_at().unwrap() + 1);
-    let reopened = open(
-        &format!("file://{}", dir.path().join("members.db").display()),
-        "",
-    )
-    .await;
-    let restarted = facade(&reopened, "a", clock);
-    restarted.recover_after_quiescence().await.unwrap();
-    restarted.recover_after_quiescence().await.unwrap();
-    let current = restarted.enrolment_state(USER).await.unwrap();
-    assert_eq!(current.state(), State::Admitted);
-    assert_eq!(current.expires_at(), None);
-    restarted.maintain(20).await.unwrap();
-    assert!(
-        restarted
-            .register
-            .member(&current.member_id())
-            .await
-            .unwrap()
-            .unwrap()
-            .handle
-            .is_some()
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn uncommitted_admission_never_creates_a_member_during_recovery() {
-    let (_dir, db) = temporary().await;
-    let clock = Clock::new();
-    let m = facade(&db, "a", clock.clone());
-    let (_, auth) = pending(&m, "a").await;
-    let before = m.resume(&auth.authentication).await.unwrap();
-    occupy(
-        &m,
-        Operation::Admission {
-            user: before.user(),
-            lease_year: lease().year(),
-            lease_month: lease().month(),
-        },
-    )
-    .await;
-    clock.set(before.expires_at().unwrap());
-    m.recover_after_quiescence().await.unwrap();
-    assert_eq!(
-        m.enrolment_state(USER).await.unwrap().state(),
-        State::Expired
-    );
-    assert!(
-        m.register
-            .member(&before.member_id())
-            .await
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn reservation_crash_resumes_or_cancels_at_the_fixed_deadline() {
-    for expire in [false, true] {
-        let (_dir, db) = temporary().await;
-        let clock = Clock::new();
-        let m = facade(&db, "a", clock.clone());
-        register(&m, USER, SUBJECT).await;
-        let before = m.enrolment_state(USER).await.unwrap();
-        occupy(
-            &m,
-            Operation::Reservation {
-                user: before.user(),
-                display: HANDLE.into(),
-                skeleton: handle().skeleton().into(),
-            },
-        )
-        .await;
-        m.register
-            .reserve_handle(
-                crgs::Reservation {
-                    member_id: before.member_id(),
-                    handle: handle(),
-                    expires_at: date(before.expires_at().unwrap()).unwrap(),
-                },
-                date(now()).unwrap(),
-            )
-            .await
-            .unwrap();
-        if expire {
-            clock.set(before.expires_at().unwrap());
-        }
-        m.recover_after_quiescence().await.unwrap();
-        let row = m.enrolment_state(USER).await.unwrap();
-        // Simulate another crash after the recovery phase committed but before
-        // its operation marker was cleared. Recovery itself must be resumable.
-        occupy(
-            &m,
-            Operation::Reservation {
-                user: before.user(),
-                display: HANDLE.into(),
-                skeleton: handle().skeleton().into(),
-            },
-        )
-        .await;
-        m.recover_after_quiescence().await.unwrap();
-        assert_eq!(m.enrolment_state(USER).await.unwrap(), row);
-        assert_eq!(
-            row.state(),
-            if expire {
-                State::Expired
-            } else {
-                State::HandleReserved
-            }
-        );
-        if expire {
-            assert!(
-                m.register
-                    .is_handle_available(
-                        handle().skeleton(),
-                        date(before.expires_at().unwrap()).unwrap()
-                    )
-                    .await
-                    .unwrap()
-            );
-        }
-    }
-}
+use crate::Storage;
+use common::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn last_key_revocation_releases_but_preserves_committed_retention() {
@@ -182,7 +11,7 @@ async fn last_key_revocation_releases_but_preserves_committed_retention() {
     let clock = Clock::new();
     let m = facade(&db, "a", clock.clone());
     let (_, login) = pending(&m, "a").await;
-    m.admit(
+    m.admit_test(
         &login.authentication,
         &policy("a"),
         &[test_gate("a", SUBJECT)],
@@ -203,10 +32,7 @@ async fn last_key_revocation_releases_but_preserves_committed_retention() {
         .await
         .unwrap();
     assert_eq!(released.state(), State::Released);
-    assert_eq!(
-        m.resume(&login.authentication).await,
-        Err(Error::Transition)
-    );
+    assert_eq!(m.resume(&login.authentication).await, Err(Error::Passkey));
     assert_eq!(m.release(USER).await.unwrap().state(), State::Released);
     assert!(
         !m.register
@@ -226,29 +52,6 @@ async fn last_key_revocation_releases_but_preserves_committed_retention() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn libsql_instances_contend_on_the_same_durable_slot() {
-    let (dir, db) = temporary().await;
-    let m = facade(&db, "a", Clock::new());
-    let second = open(
-        &format!("file://{}", dir.path().join("members.db").display()),
-        "",
-    )
-    .await;
-    let other = facade(&second, "a", Clock::new());
-    let idle = m.storage.load().await.unwrap();
-    let active = idle.next(Some(Operation::Busy)).unwrap();
-    let (first, second) = tokio::join!(
-        m.storage.compare_exchange(&idle, &active),
-        other.storage.compare_exchange(&idle, &active)
-    );
-    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
-    assert_eq!(other.maintain(10).await, Err(Error::Busy));
-    // Both simulated writers have stopped before recovery is allowed.
-    other.recover_after_quiescence().await.unwrap();
-    other.maintain(10).await.unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn committed_passkey_receipt_survives_an_interrupted_registration() {
     use webauthn_authenticator_rs::{AuthenticatorBackend, softtoken::SoftToken};
     let (_dir, db) = temporary().await;
@@ -262,7 +65,6 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
             300_000,
         )
         .unwrap();
-    occupy(&m, Operation::Busy).await;
     let keys = m.passkeys.clone();
     blocking(move || {
         keys.finish_registration(
@@ -273,7 +75,6 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
     })
     .await
     .unwrap();
-    m.recover_after_quiescence().await.unwrap();
     assert_eq!(
         m.enrolment_state(USER).await.unwrap().state(),
         State::PasskeyRegistered
@@ -285,31 +86,12 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn corrupt_storage_fails_closed_without_echoing_sensitive_data() {
-    let (_dir, db) = temporary().await;
-    let m = facade(&db, "a", Clock::new());
-    m.maintain(1).await.unwrap();
-    let scope = db.community("a").unwrap();
-    let mut tx = scope.tx().await.unwrap();
-    tx.execute(
-        "UPDATE cmbr_coordination SET payload = ?1 WHERE slot = 1",
-        ["sensitive-invalid-json"],
-    )
-    .await
-    .unwrap();
-    tx.commit().await.unwrap();
-    let error = m.maintain(1).await.unwrap_err();
-    assert_eq!(error, Error::Unavailable);
-    assert!(!format!("{error:?} {error}").contains("sensitive-invalid-json"));
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn renewal_cannot_resurrect_a_handle_due_for_release() {
     let (_dir, db) = temporary().await;
     let clock = Clock::new();
     let m = facade(&db, "a", clock.clone());
     let (_, login) = pending(&m, "a").await;
-    m.admit(
+    m.admit_test(
         &login.authentication,
         &policy("a"),
         &[test_gate("a", SUBJECT)],
@@ -322,88 +104,278 @@ async fn renewal_cannot_resurrect_a_handle_due_for_release() {
     let mut gate = test_gate("a", SUBJECT);
     gate.valid_until = late.timestamp() + 3600;
     assert_eq!(
-        m.admit(
+        m.admit_test(
             &login.authentication,
             &policy("a"),
             &[gate],
             crgs::YearMonth::new(2030, 9).unwrap()
         )
         .await,
-        Err(Error::Transition)
+        Err(Error::Policy)
     );
+    m.maintain(50).await.unwrap();
     assert_eq!(
         m.enrolment_state(USER).await.unwrap().state(),
         State::Released
     );
-    assert!(!m.storage.load().await.unwrap().is_busy());
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn recovery_after_register_refusal_preserves_the_other_owner() {
+async fn different_members_log_in_and_read_lobbies_concurrently_without_writes() {
     let (_dir, db) = temporary().await;
     let m = facade(&db, "a", Clock::new());
-    let (_, owner) = pending(&m, "a").await;
-    let second_user = Uuid::from_u128(2);
-    register(&m, second_user, "second-subject").await;
-    let before = m.enrolment_state(second_user).await.unwrap();
-    occupy(
-        &m,
-        Operation::Reservation {
-            user: before.user(),
-            display: HANDLE.into(),
-            skeleton: handle().skeleton().into(),
-        },
-    )
-    .await;
-    m.recover_after_quiescence().await.unwrap();
-    assert_eq!(
-        m.enrolment_state(second_user).await.unwrap().state(),
-        State::PasskeyRegistered
+    let mut first = register(&m, USER, SUBJECT).await;
+    let other = Uuid::from_u128(2);
+    let mut second = register(&m, other, "second-subject").await;
+    let (a, b) = tokio::join!(login(&m, &mut first, USER), login(&m, &mut second, other));
+    m.reserve_handle(&a.authentication, HANDLE, &[])
+        .await
+        .unwrap();
+    m.reserve_handle(&b.authentication, "another_handle", &[])
+        .await
+        .unwrap();
+    let before_a = m.enrol_store.load(USER).await.unwrap();
+    let before_b = m.enrol_store.load(other).await.unwrap();
+    let (a, b) = tokio::join!(
+        m.lobby_test(&a.authentication, &policy("a"), &[]),
+        m.lobby_test(&b.authentication, &policy("a"), &[])
     );
-    assert_eq!(
-        m.resume(&owner.authentication).await.unwrap().state(),
-        State::GatesInProgress
-    );
+    assert!(a.is_ok() && b.is_ok());
+    assert_eq!(before_a, m.enrol_store.load(USER).await.unwrap());
+    assert_eq!(before_b, m.enrol_store.load(other).await.unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelled_reservation_finishes_and_never_blocks_other_members() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "a", Clock::new());
+    let mut first = register(&m, USER, SUBJECT).await;
+    let auth = login(&m, &mut first, USER).await.authentication;
+    let other = Uuid::from_u128(2);
+    let mut second = register(&m, other, "second-subject").await;
+    let second_auth = login(&m, &mut second, other).await.authentication;
+    // The actual register transaction waits for this writer. Read operations use
+    // other leases from the same pool and must not acquire the writer lock.
+    let writer = db.community("a").unwrap().tx().await.unwrap();
+    let copy = m.clone();
+    let task = tokio::spawn(async move { copy.reserve_handle(&auth, HANDLE, &[]).await });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    task.abort();
+    let _ = task.await;
     assert!(
-        !m.register
-            .is_handle_available(handle().skeleton(), date(now()).unwrap())
+        tokio::time::timeout(std::time::Duration::from_secs(1), m.resume(&second_auth))
             .await
             .unwrap()
+            .is_ok()
+    );
+    drop(writer);
+    // Queueing behind this member waits for the owned cross-leaf task to finish.
+    let _guard = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        crate::storage::member_lock("a", USER),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        m.enrol_store.load(USER).await.unwrap().unwrap().state(),
+        State::HandleReserved
+    );
+    assert!(!m.is_handle_available(HANDLE, &[]).await.unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoked_authentication_cannot_change_pins_or_revoke_the_remaining_key() {
+    use webauthn_authenticator_rs::{AuthenticatorBackend, softtoken::SoftToken};
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "a", Clock::new());
+    let (_, login) = pending(&m, "a").await;
+    // Provision a second real passkey through the owning leaf's authorized test seam.
+    let keys = m.passkeys.clone();
+    let (challenge, pending) = blocking(move || keys.start_registration(USER))
+        .await
+        .unwrap();
+    let mut token = SoftToken::new(true).unwrap().0;
+    let response = token
+        .perform_register(
+            cpky::Url::parse(ORIGIN).unwrap(),
+            challenge.public_key,
+            300000,
+        )
+        .unwrap();
+    let keys = m.passkeys.clone();
+    let second = blocking(move || {
+        keys.finish_registration(
+            pending,
+            &response,
+            cpky::CreationMonth::new(2026, 9).unwrap(),
+        )
+    })
+    .await
+    .unwrap();
+    let stolen = login.authentication.credential_id().clone();
+    assert_eq!(
+        m.revoke_passkey(&login.authentication, stolen)
+            .await
+            .unwrap()
+            .state(),
+        State::HandleReserved
+    );
+    assert_eq!(
+        m.revoke_passkey(&login.authentication, second.credential_id().clone())
+            .await,
+        Err(Error::Passkey)
+    );
+    assert_eq!(
+        m.get_pin(&login.authentication, "restricted").await,
+        Err(Error::Passkey)
+    );
+    assert_eq!(
+        m.session_is_active(&login.authentication, second.credential_id())
+            .await,
+        Err(Error::Passkey)
+    );
+    assert!(
+        m.credentials(USER)
+            .await
+            .unwrap()
+            .iter()
+            .any(|key| key.credential_id() == second.credential_id() && !key.is_revoked())
+    );
+    assert_eq!(m.revocations(10).await.unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pure_lobby_keeps_admission_and_returns_irreversible_expiry_warnings() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "a", Clock::new());
+    let (_, login) = pending(&m, "a").await;
+    let mut policy = verified_policy(&policy("a"), now()).await;
+    let snapshot = policy.verified_settings(now() as u64).await.unwrap();
+    let empty = checked(&snapshot, SUBJECT, &[], now()).await;
+    let lobby = m
+        .lobby(&login.authentication, &policy, &snapshot, &empty)
+        .await
+        .unwrap();
+    assert!(lobby.warnings.iter().any(|warning| matches!(warning, Warning::RegistrationExpires { deadline } if deadline % 86400 == 0)));
+    assert!(
+        lobby
+            .warnings
+            .contains(&Warning::AddSecondDeviceOrSyncedPasskey)
+    );
+    let gates = checked(&snapshot, SUBJECT, &[test_gate("a", SUBJECT)], now()).await;
+    m.admit(&login.authentication, &policy, &snapshot, &gates, lease())
+        .await
+        .unwrap();
+    let before = m.enrol_store.load(USER).await.unwrap().unwrap();
+    let lobby = m
+        .lobby(&login.authentication, &policy, &snapshot, &empty)
+        .await
+        .unwrap();
+    assert!(!lobby.decision.allowed);
+    assert_eq!(lobby.enrolment, before);
+    assert_eq!(m.enrol_store.load(USER).await.unwrap().unwrap(), before);
+    assert!(
+        !lobby
+            .warnings
+            .iter()
+            .any(|warning| matches!(warning, Warning::RegistrationExpires { .. }))
+    );
+    assert_eq!(
+        m.storage.probation(SUBJECT).await.unwrap(),
+        Some(Some(cplc::day(now() as u64) + 14 * cplc::DAY))
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn cancellation_leaves_the_durable_slot_occupied() {
+async fn stale_verified_inputs_and_unbounded_leases_cannot_admit() {
     let (_dir, db) = temporary().await;
     let m = facade(&db, "a", Clock::new());
-    let entered = tokio::sync::Notify::new();
-    let mut operation = Box::pin(m.run(async |_| {
-        entered.notify_one();
-        std::future::pending::<Result<()>>().await
-    }));
-    tokio::select! {
-        _ = entered.notified() => {}
-        _ = &mut operation => panic!("operation must remain pending"),
-    }
-    drop(operation);
-    assert_eq!(m.maintain(1).await, Err(Error::Busy));
-    m.recover_after_quiescence().await.unwrap();
-    m.maintain(1).await.unwrap();
+    let (_, login) = pending(&m, "a").await;
+    let mut policy = verified_policy(&policy("a"), now()).await;
+    let old = policy.verified_settings(now() as u64).await.unwrap();
+    let gates = checked(&old, SUBJECT, &[test_gate("a", SUBJECT)], now()).await;
+    assert_eq!(
+        m.admit(
+            &login.authentication,
+            &policy,
+            &old,
+            &gates,
+            crgs::YearMonth::new(9999, 12).unwrap()
+        )
+        .await,
+        Err(Error::InvalidInput)
+    );
+    policy
+        .publish(cplc::SnapshotKind::Settings, now() as u64)
+        .await
+        .unwrap();
+    assert_eq!(
+        m.admit(&login.authentication, &policy, &old, &gates, lease())
+            .await,
+        Err(Error::Policy)
+    );
+    let current = policy.verified_settings(now() as u64).await.unwrap();
+    assert_eq!(
+        m.admit(&login.authentication, &policy, &current, &gates, lease())
+            .await,
+        Err(Error::Policy)
+    );
+    assert_eq!(
+        m.enrol_store.load(USER).await.unwrap().unwrap().state(),
+        State::HandleReserved
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn recovery_fails_closed_for_a_missing_identity() {
+async fn clock_and_storage_errors_leave_no_operation_lock() {
     let (_dir, db) = temporary().await;
-    let m = facade(&db, "a", Clock::new());
-    occupy(
-        &m,
-        Operation::Admission {
-            user: Uuid::nil(),
-            lease_year: 2027,
-            lease_month: 9,
-        },
-    )
-    .await;
-    assert_eq!(m.recover_after_quiescence().await, Err(Error::Unavailable));
-    assert!(m.storage.load().await.unwrap().is_busy());
+    let clock = Clock::new();
+    let m = facade(&db, "a", clock.clone());
+    let (_, login) = pending(&m, "a").await;
+    clock.set(-1);
+    assert!(
+        m.reserve_handle(&login.authentication, HANDLE, &[])
+            .await
+            .is_err()
+    );
+    clock.set(now());
+    m.reserve_handle(&login.authentication, HANDLE, &[])
+        .await
+        .unwrap();
+    // Delete only the test's probation table to fail after the actual register
+    // admission. The operation returns an error; sessions and retries stay live.
+    let mut migrations: Vec<_> = crate::SCHEMAS
+        .iter()
+        .enumerate()
+        .map(|(i, (name, sql))| crlt::Migration::new(i as u32 + 1, name, sql))
+        .collect();
+    migrations.push(crlt::Migration::new(
+        7,
+        "break-probation",
+        "DROP TABLE cmbr_probation;",
+    ));
+    db.migrate(&migrations).await.unwrap();
+    assert_eq!(
+        m.admit_test(
+            &login.authentication,
+            &policy("a"),
+            &[test_gate("a", SUBJECT)],
+            lease()
+        )
+        .await,
+        Err(Error::Unavailable)
+    );
+    assert!(m.resume(&login.authentication).await.is_ok());
+    migrations.push(crlt::Migration::new(8,"restore-probation","CREATE TABLE cmbr_probation (community_id TEXT NOT NULL, subject TEXT NOT NULL, probation_until INTEGER, PRIMARY KEY (community_id, subject)) WITHOUT ROWID;"));
+    db.migrate(&migrations).await.unwrap();
+    assert!(
+        m.admit_test(
+            &login.authentication,
+            &policy("a"),
+            &[test_gate("a", SUBJECT)],
+            lease()
+        )
+        .await
+        .is_ok()
+    );
 }

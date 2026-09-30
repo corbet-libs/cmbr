@@ -7,10 +7,15 @@
 mod membership;
 mod storage;
 
-pub use membership::{Config, Login, Membership, PendingLogin, PendingRegistration};
-pub use storage::{Checkpoint, LibsqlStorage, MemoryStorage, SCHEMA, Storage};
-// Keep the exact pinned protocol types available to composition roots.
-pub use {cgrd, clbs, cnrl, cpky, cpns, crbk, crgs, crlt};
+pub use membership::{
+    Config, Lobby, Login, Membership, PendingLogin, PendingRegistration, Warning,
+};
+pub use storage::{LibsqlStorage, MemoryStorage, Revocation, SCHEMA, Storage};
+// Export protocol values only; callers cannot reach leaf writers through cmbr.
+pub use cnrl::{Record, State};
+pub use cpky::{Authentication, Uuid};
+pub use cpns::server::Pin;
+pub use crgs::{Handle, Member, YearMonth};
 
 /// Append these schemas, in this order, to the service's complete migration list.
 /// The root assigns contiguous versions; leaves never migrate independently.
@@ -51,10 +56,10 @@ pub enum Error {
     #[error("pin operation refused")]
     Pin,
     /// Another operation is running, or recovery requires a quiescent service.
-    #[error("membership operation pending; retry or recover after quiescence")]
+    #[error("membership revision conflict; retry with current state")]
     Busy,
     /// Storage, task execution or verification infrastructure failed.
-    #[error("membership unavailable; reconcile before retrying")]
+    #[error("membership unavailable")]
     Unavailable,
 }
 

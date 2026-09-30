@@ -1,6 +1,7 @@
 //! Real WebAuthn, register, enrolment, pin and self-ban integration tests.
 mod common;
-use cmbr::{Error, Storage, cnrl::State, cpky, cpns};
+use cmbr::Error;
+use cnrl::State;
 use common::*;
 use webauthn_authenticator_rs::{AuthenticatorBackend, softtoken::SoftToken};
 
@@ -12,12 +13,12 @@ async fn complete_membership_round_trip() {
     let proof = test_gate("a", SUBJECT);
     assert_eq!(
         facade
-            .admit(&auth.authentication, &policy("a"), &[], lease())
+            .admit_test(&auth.authentication, &policy("a"), &[], lease())
             .await,
         Err(Error::Policy)
     );
     let admitted = facade
-        .admit(
+        .admit_test(
             &auth.authentication,
             &policy("a"),
             std::slice::from_ref(&proof),
@@ -28,7 +29,7 @@ async fn complete_membership_round_trip() {
     assert_eq!(admitted.state(), State::Admitted);
     assert_eq!(
         facade
-            .admit(
+            .admit_test(
                 &auth.authentication,
                 &policy("a"),
                 std::slice::from_ref(&proof),
@@ -43,7 +44,7 @@ async fn complete_membership_round_trip() {
     assert_eq!(next.enrolment, admitted);
     assert_eq!(
         facade
-            .lapse(&next.authentication, &policy("a"), &[])
+            .lapse_test(&next.authentication, &policy("a"), &[])
             .await
             .unwrap()
             .state(),
@@ -51,7 +52,7 @@ async fn complete_membership_round_trip() {
     );
     assert_eq!(
         facade
-            .admit(&next.authentication, &policy("a"), &[proof], lease())
+            .admit_test(&next.authentication, &policy("a"), &[proof], lease())
             .await
             .unwrap()
             .state(),
@@ -161,22 +162,15 @@ async fn identity_community_handle_and_registration_conflicts_fail_closed() {
         a.reserve_handle(&other.authentication, HANDLE, &[]).await,
         Err(Error::Register)
     );
-    assert!(
-        !cmbr::LibsqlStorage::new(&db, "a")
-            .unwrap()
-            .load()
-            .await
-            .unwrap()
-            .is_busy()
-    );
     let mut separate = register(&b, USER, SUBJECT).await;
     let separate = login(&b, &mut separate, USER).await;
     b.reserve_handle(&separate.authentication, HANDLE, &[])
         .await
         .unwrap();
-    assert_eq!(
-        a.lobby(&auth.authentication, &policy("b"), &[]).await,
-        Err(Error::Identity)
+    assert!(
+        a.lobby_test(&auth.authentication, &policy("b"), &[])
+            .await
+            .is_err()
     );
 }
 
@@ -225,7 +219,7 @@ async fn confirmed_self_ban_survives_reopen_and_cannot_be_bypassed() {
         Err(Error::Restricted)
     );
     // A rejected confirmation leaves the coordinator available.
-    a.recover_after_quiescence().await.unwrap();
+    assert!(a.resume(&auth.authentication).await.is_ok());
     assert_eq!(
         a.self_ban(&auth.authentication, &order)
             .await

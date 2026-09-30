@@ -26,6 +26,9 @@ jobs:
           cache-on-failure: true
       - run: rustc --version
       - run: cargo fmt --all --check
+      - run: node --test .github/check-pins.test.mjs
+      - run: cargo metadata --locked --format-version 1 > dependency-metadata.json
+      - run: node .github/check-pins.mjs dependency-metadata.json
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - uses: actions/upload-artifact@v4

@@ -4,9 +4,8 @@ use chrono::{DateTime, Datelike, Utc};
 use cpky::{Authentication, Uuid};
 use cpns::server::{ChangeTokenVerifier, Pin, Pins};
 
-use crate::{Checkpoint, Error, Result, Storage, storage::Operation};
+use crate::{Error, Result, Storage};
 use cnrl::{Event, Record, State, Storage as _};
-use crgs::{Storage as _, Transaction as _};
 
 /// Resolved service configuration. No product policy defaults are supplied.
 pub struct Config {
@@ -16,6 +15,8 @@ pub struct Config {
     pub membership_action: String,
     /// Existing handle retention is materialized by crgs.
     pub release_period: crgs::ReleasePeriod,
+    /// Maximum lease extension from the current month (1–24 months).
+    pub lease_months: u32,
     /// Community-specific WebAuthn relying party ID.
     pub rp_id: String,
     /// Explicit allowed HTTPS origins, validated by cpky.
@@ -42,8 +43,38 @@ pub struct Login {
     pub enrolment: Record,
 }
 
+/// Current lobby response. Warnings are part of the API, not optional UI policy.
+pub struct Lobby {
+    /// Pure current enrolment view.
+    pub enrolment: Record,
+    /// cplc's current policy decision.
+    pub decision: crbk::Decision,
+    /// Required no-return and device-resilience messages.
+    pub warnings: Vec<Warning>,
+}
+/// Product warnings returned before the irreversible no-return boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Warning {
+    /// Finish before this exclusive UTC-day deadline; expiry permanently prevents rejoining.
+    RegistrationExpires {
+        /// Exclusive UTC-day registration deadline.
+        deadline: i64,
+    },
+    /// Register a second device or use a synced passkey; losing every passkey permanently prevents rejoining.
+    AddSecondDeviceOrSyncedPasskey,
+}
+
 struct SharedClock<C>(Arc<C>);
 impl<C: clbs::Clock> clbs::Clock for SharedClock<C> {
+    /// Durable revocation events for cmnt to forward to cplc before issuance.
+    pub async fn revocations(&self, limit: usize) -> Result<Vec<crate::Revocation>> {
+        self.storage.revocations(limit).await
+    }
+    /// Acknowledge only after the matching cplc epoch update and publication.
+    pub async fn acknowledge_revocation(&self, event: &crate::Revocation) -> Result<()> {
+        self.storage.acknowledge(event).await
+    }
+
     fn now(&self) -> clbs::Result<i64> {
         self.0.now()
     }
@@ -53,19 +84,44 @@ impl<C: clbs::Clock> clbs::Clock for SharedClock<C> {
 /// The coordinator must be shared by every writer to this community database.
 /// Supply real, fail-closed change-spend and self-ban verification adapters.
 pub struct Membership<S, V, L, C = clbs::SystemClock> {
-    storage: S,
+    storage: Arc<S>,
     passkeys: Arc<cpky::Passkeys<cpky::LibsqlStore>>,
-    enrol: cnrl::Enrol<cnrl::LibsqlStorage>,
+    enrol: Arc<cnrl::Enrol<cnrl::LibsqlStorage>>,
     enrol_store: cnrl::LibsqlStorage,
-    register: crgs::Register<crgs::LibsqlStorage>,
+    register: Arc<crgs::Register<crgs::LibsqlStorage>>,
     register_store: crgs::LibsqlStorage,
-    pins: Pins<cpns::server::libsql::LibsqlStore, V>,
-    legal: clbs::Gate<clbs::LibsqlStore, L, SharedClock<C>>,
+    pins: Arc<Pins<cpns::server::libsql::LibsqlStore, V>>,
+    legal: Arc<clbs::Gate<clbs::LibsqlStore, L, SharedClock<C>>>,
     clock: Arc<C>,
     action: String,
+    lease_months: u32,
 }
 
-impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Membership<S, V, L, C> {
+impl<S, V, L, C> Clone for Membership<S, V, L, C> {
+    fn clone(&self) -> Self {
+        Self {
+            storage: self.storage.clone(),
+            passkeys: self.passkeys.clone(),
+            enrol: self.enrol.clone(),
+            enrol_store: self.enrol_store.clone(),
+            register: self.register.clone(),
+            register_store: self.register_store.clone(),
+            pins: self.pins.clone(),
+            legal: self.legal.clone(),
+            clock: self.clock.clone(),
+            action: self.action.clone(),
+            lease_months: self.lease_months,
+        }
+    }
+}
+
+impl<
+    S: Storage + 'static,
+    V: ChangeTokenVerifier + 'static,
+    L: clbs::Verifier + 'static,
+    C: clbs::Clock + 'static,
+> Membership<S, V, L, C>
+{
     /// Construct from a migrated service-owned database and a multithreaded
     /// Tokio runtime. All leaves use the coordinator's immutable community.
     /// The service authenticates global pseudonyms before registration, supplies
@@ -80,6 +136,9 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
     ) -> Result<Self> {
         crate::text(storage.community())?;
         crate::text(&config.membership_action)?;
+        if !(1..=24).contains(&config.lease_months) {
+            return Err(Error::InvalidInput);
+        }
         let community = storage.community();
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| Error::InvalidInput)?;
         let passkeys = cpky::Passkeys::new(
@@ -106,16 +165,17 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
             SharedClock(clock.clone()),
         );
         Ok(Self {
-            storage,
+            storage: Arc::new(storage),
             passkeys: Arc::new(passkeys),
-            enrol,
+            enrol: Arc::new(enrol),
             enrol_store,
-            register,
+            register: Arc::new(register),
             register_store,
-            pins,
-            legal,
+            pins: Arc::new(pins),
+            legal: Arc::new(legal),
             clock,
             action: config.membership_action,
+            lease_months: config.lease_months,
         })
     }
 
@@ -132,7 +192,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         if user.is_nil() {
             return Err(Error::InvalidInput);
         }
-        self.run(async |_| {
+        async {
             self.unrestricted(pseudonym).await?;
             let row = self.enrol.start(user, pseudonym, self.now()?).await?;
             if row.state() != State::Started || !self.credentials(user).await?.is_empty() {
@@ -141,7 +201,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
             let keys = self.passkeys.clone();
             let (challenge, pending) = blocking(move || keys.start_registration(user)).await?;
             Ok((challenge, PendingRegistration { user, pending }))
-        })
+        }
         .await
     }
 
@@ -152,7 +212,8 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         state: PendingRegistration,
         response: cpky::RegisterPublicKeyCredential,
     ) -> Result<Record> {
-        self.run(async |_| {
+        let _guard = crate::storage::member_lock(self.storage.community(), state.user).await;
+        async {
             let now = self.now()?;
             let row = self.live(state.user, now).await?;
             if row.state() != State::Started || !self.credentials(state.user).await?.is_empty() {
@@ -170,7 +231,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                 .enrol
                 .apply(&row, Event::PasskeyRegistered(&receipt), now)
                 .await?)
-        })
+        }
         .await
     }
 
@@ -179,12 +240,14 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         &self,
         user: Uuid,
     ) -> Result<(cpky::RequestChallengeResponse, PendingLogin)> {
-        self.run(async |_| {
-            self.live(user, self.now()?).await?;
+        async {
+            self.now()?;
+            // cpky supplies the same coarse refusal for unknown or keyless users.
+
             let keys = self.passkeys.clone();
             let (challenge, pending) = blocking(move || keys.start_authentication(user)).await?;
             Ok((challenge, PendingLogin { user, pending }))
-        })
+        }
         .await
     }
 
@@ -195,7 +258,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         state: PendingLogin,
         response: cpky::PublicKeyCredential,
     ) -> Result<Login> {
-        self.run(async |_| {
+        async {
             let keys = self.passkeys.clone();
             let authentication =
                 blocking(move || keys.finish_authentication(state.pending, &response)).await?;
@@ -207,32 +270,32 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                 authentication,
                 enrolment,
             })
-        })
+        }
         .await
     }
 
     /// Trusted service lookup, including expiry, lost registration receipts and
     /// current legal restrictions. Use `resume` for a member-facing endpoint.
     pub async fn enrolment_state(&self, user: Uuid) -> Result<Record> {
-        self.run(async |_| self.sync(user, self.now()?).await).await
+        let _guard = crate::storage::member_lock(self.storage.community(), user).await;
+        self.sync(user, self.now()?).await
     }
 
     /// Resume the stable pseudonym binding after a committed cpky authentication.
     pub async fn resume(&self, auth: &Authentication) -> Result<Record> {
-        self.run(async |_| self.authenticated(auth, self.now()?).await)
-            .await
+        self.authenticated(auth, self.now()?).await
     }
 
     /// Validate a candidate and check the actual register's reservation/lease state.
     /// Callers must throttle this unauthenticated lookup and supply current reserved names.
     pub async fn is_handle_available(&self, handle: &str, reserved: &[String]) -> Result<bool> {
         let checked = cgrd::check_handle(handle, reserved).map_err(|_| Error::InvalidInput)?;
-        self.run(async |_| {
+        async {
             Ok(self
                 .register
                 .is_handle_available(&checked.skeleton, date(self.now()?)?)
                 .await?)
-        })
+        }
         .await
     }
 
@@ -243,19 +306,19 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         auth: &Authentication,
         credential: &cpky::CredentialID,
     ) -> Result<bool> {
-        self.run(async |_| {
+        async {
             self.authenticated(auth, self.now()?).await?;
-            Ok(self
-                .credentials(auth.member())
-                .await?
-                .iter()
-                .any(|key| key.credential_id() == credential && !key.is_revoked()))
-        })
+            Ok(self.credentials(auth.member()).await?.iter().any(|key| {
+                key.credential_id() == credential
+                    && credential == auth.credential_id()
+                    && !key.is_revoked()
+            }))
+        }
         .await
     }
 
-    /// Normalize and validate with cgrd, then reserve its skeleton through crgs.
-    /// The reserved-name list must come from authenticated, current policy.
+    /// Reserve a validated handle. The per-member task completes even if its
+    /// caller disconnects; a failure leaves no durable lock to recover.
     pub async fn reserve_handle(
         &self,
         auth: &Authentication,
@@ -263,124 +326,166 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         reserved: &[String],
     ) -> Result<Record> {
         let checked = cgrd::check_handle(handle, reserved).map_err(|_| Error::InvalidInput)?;
-        self.run(async |checkpoint| {
-            let now = self.now()?;
-            let row = self.authenticated(auth, now).await?;
+        let guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        let m = self.clone();
+        let auth = auth.clone();
+        tokio::spawn(async move {
+            let _guard = guard;
+            let now = m.now()?;
+            let row = m.authenticated(&auth, now).await?;
             if !matches!(
                 row.state(),
                 State::PasskeyRegistered | State::HandleReserved | State::GatesInProgress
             ) {
                 return Err(Error::Transition);
             }
-            let reservation = crgs::Reservation {
-                member_id: row.member_id(),
-                handle: crgs::Handle::new(&checked.normalized, &checked.skeleton)?,
-                expires_at: date(row.expires_at().ok_or(Error::Transition)?)?,
-            };
-            self.prepare(
-                checkpoint,
-                Operation::Reservation {
-                    user: row.user(),
-                    display: checked.normalized,
-                    skeleton: checked.skeleton,
-                },
-            )
-            .await?;
-            let receipt = match self.register.reserve_handle(reservation, date(now)?).await {
-                Ok(r) => r,
-                Err(e) => return self.register_error(checkpoint, e).await,
-            };
-            Ok(self
-                .enrol
+            let receipt = m
+                .register
+                .reserve_handle(
+                    crgs::Reservation {
+                        member_id: row.member_id(),
+                        handle: crgs::Handle::new(&checked.normalized, &checked.skeleton)?,
+                        expires_at: date(row.expires_at().ok_or(Error::Transition)?)?,
+                    },
+                    date(now)?,
+                )
+                .await?;
+            Ok(m.enrol
                 .apply(&row, Event::HandleReserved(&receipt), now)
                 .await?)
         })
         .await
+        .map_err(|_| Error::Unavailable)?
     }
 
-    /// Evaluate the real rulebook and return transient missing requirements.
-    /// Snapshot authenticity/freshness and gate verification belong to cmnt/cgts.
-    pub async fn lobby(
+    /// Pure lobby: current facts and cplc's decision, without lifecycle writes.
+    pub async fn lobby<R: crbk::Storage, P: cplc::Storage, K: cplc::csgn::Store>(
         &self,
         auth: &Authentication,
-        policy: &crbk::Snapshot,
-        gates: &[crbk::GateResult],
-    ) -> Result<(Record, crbk::Decision)> {
-        self.run(async |_| {
-            let now = self.now()?;
-            let row = self.authenticated(auth, now).await?;
-            Ok(self.enrol.evaluate(&row, policy, gates, now).await?)
+        policy: &cplc::Policy<R, P, K>,
+        snapshot: &cplc::VerifiedSnapshot,
+        gates: &cgts::CheckedGates,
+    ) -> Result<Lobby> {
+        let now = self.now()?;
+        let row = self.authenticated(auth, now).await?;
+        let decision = policy
+            .may(
+                snapshot,
+                crbk::Subject {
+                    id: row.subject(),
+                    membership: row.state().membership(),
+                },
+                &self.action,
+                gates,
+                now as u64,
+            )
+            .await
+            .map_err(|_| Error::Policy)?;
+        let one_passkey = self
+            .credentials(row.user())
+            .await?
+            .iter()
+            .filter(|key| !key.is_revoked())
+            .count()
+            == 1;
+        let mut warnings = Vec::new();
+        if let Some(deadline) = row.expires_at() {
+            warnings.push(Warning::RegistrationExpires { deadline });
+        }
+        if one_passkey {
+            warnings.push(Warning::AddSecondDeviceOrSyncedPasskey);
+        }
+        Ok(Lobby {
+            enrolment: row,
+            decision,
+            warnings,
         })
-        .await
     }
 
-    /// Admit or renew only after a fresh positive rulebook decision and clbs check.
-    /// Roles start as Member; role administration belongs to the owning service.
-    /// Uses the stored reservation/handle; callers cannot substitute a skeleton.
-    pub async fn admit(
+    /// Admit or renew from cplc's fresh decision over verified capabilities only.
+    /// The bounded lease and coarse probation are owned by membership.
+    ///
+    /// ```compile_fail
+    /// fn raw(snapshot: crbk::Snapshot, results: Vec<crbk::GateResult>) {
+    ///     let _: &cplc::VerifiedSnapshot = &snapshot;
+    ///     let _: &cgts::CheckedGates = &results;
+    /// }
+    /// ```
+    pub async fn admit<R: crbk::Storage, P: cplc::Storage, K: cplc::csgn::Store>(
         &self,
         auth: &Authentication,
-        policy: &crbk::Snapshot,
-        gates: &[crbk::GateResult],
+        policy: &cplc::Policy<R, P, K>,
+        snapshot: &cplc::VerifiedSnapshot,
+        gates: &cgts::CheckedGates,
         lease: crgs::YearMonth,
     ) -> Result<Record> {
-        self.run(async |checkpoint| {
-            let now = self.now()?;
-            let row = self.authenticated(auth, now).await?;
-            let (row, decision) = self.enrol.evaluate(&row, policy, gates, now).await?;
-            if !decision.allowed {
-                return Err(Error::Policy);
-            }
-            let current_month =
-                crgs::YearMonth::new(date(now)?.year() as u16, date(now)?.month() as u8)?;
-            if lease < current_month {
-                return Err(Error::InvalidInput);
-            }
-            let handle = self.current_handle(&row).await?.ok_or(Error::Transition)?;
-            self.prepare(
-                checkpoint,
-                Operation::Admission {
-                    user: row.user(),
-                    lease_year: lease.year(),
-                    lease_month: lease.month(),
+        let guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        let now = self.now()?;
+        let row = self.authenticated(auth, now).await?;
+        let decision = policy
+            .may(
+                snapshot,
+                crbk::Subject {
+                    id: row.subject(),
+                    membership: row.state().membership(),
                 },
+                &self.action,
+                gates,
+                now as u64,
             )
-            .await?;
-            let member = if matches!(row.state(), State::Admitted | State::Lapsed) {
-                match self
-                    .register
+            .await
+            .map_err(|_| Error::Policy)?;
+        if !decision.allowed {
+            return Err(Error::Policy);
+        }
+        let current = date(now)?;
+        let last = current
+            .checked_add_months(chrono::Months::new(self.lease_months))
+            .ok_or(Error::InvalidInput)?;
+        if lease < crgs::YearMonth::new(current.year() as u16, current.month() as u8)?
+            || lease > crgs::YearMonth::new(last.year() as u16, last.month() as u8)?
+        {
+            return Err(Error::InvalidInput);
+        }
+        let durations = crbk::MembershipSettings::from_snapshot(snapshot.settings())
+            .map_err(|_| Error::Policy)?;
+        let probation_until = cplc::day(now as u64)
+            .checked_add(u64::from(durations.probation_days) * cplc::DAY)
+            .ok_or(Error::InvalidInput)?;
+        let m = self.clone();
+        let auth = auth.clone();
+        tokio::spawn(async move {
+            let _guard = guard;
+            m.identity(&auth).await?;
+            m.unrestricted(row.subject()).await?;
+            let row = m
+                .enrol
+                .apply(&row, Event::PolicyEvaluated(&decision), now)
+                .await?;
+            let member = if m.register.member(&row.member_id()).await?.is_some() {
+                m.register
                     .extend_lease(&row.member_id(), lease, date(now)?)
-                    .await
-                {
-                    Ok(member) => member,
-                    Err(e) => return self.register_error(checkpoint, e).await,
-                }
+                    .await?
             } else {
-                match self
-                    .register
+                m.register
                     .admit(
                         crgs::Admission {
                             id: row.member_id(),
-                            handle,
+                            handle: m.current_handle(&row).await?.ok_or(Error::Transition)?,
                             role: crgs::Role::Member,
                             lease_end: lease,
                         },
                         date(now)?,
                     )
-                    .await
-                {
-                    Ok(member) => member,
-                    Err(e) => return self.register_error(checkpoint, e).await,
-                }
+                    .await?
             };
             if member.handle.is_none() {
-                self.enrol
-                    .apply(&row, Event::RegisterReleased(&member), now)
-                    .await?;
-                self.prepare(checkpoint, Operation::Busy).await?;
                 return Err(Error::Transition);
             }
-            Ok(self
+            // Policy is never reconstructed during recovery. A retry requires a
+            // fresh cplc decision; a register row alone cannot readmit a lapse.
+            m.unrestricted(row.subject()).await?;
+            let row = m
                 .enrol
                 .apply(
                     &row,
@@ -390,24 +495,40 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                     },
                     now,
                 )
-                .await?)
+                .await?;
+            m.storage
+                .initialize_probation(row.subject(), probation_until)
+                .await?;
+            m.storage
+                .clear_passed_probation(row.subject(), now as u64)
+                .await?;
+            Ok(row)
         })
         .await
+        .map_err(|_| Error::Unavailable)?
     }
 
-    /// Lapse admission using the rulebook's current negative decision.
-    /// A positive verdict never becomes an arbitrary administrative lapse.
-    pub async fn lapse(
+    /// Explicit lapse; merely asking for the lobby never calls this transition.
+    pub async fn lapse<R: crbk::Storage, P: cplc::Storage, K: cplc::csgn::Store>(
         &self,
         auth: &Authentication,
-        policy: &crbk::Snapshot,
-        gates: &[crbk::GateResult],
+        policy: &cplc::Policy<R, P, K>,
+        snapshot: &cplc::VerifiedSnapshot,
+        gates: &cgts::CheckedGates,
     ) -> Result<Record> {
-        let (row, decision) = self.lobby(auth, policy, gates).await?;
-        if decision.allowed {
+        let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        let lobby = self.lobby(auth, policy, snapshot, gates).await?;
+        if lobby.decision.allowed {
             return Err(Error::Policy);
         }
-        Ok(row)
+        Ok(self
+            .enrol
+            .apply(
+                &lobby.enrolment,
+                Event::PolicyEvaluated(&lobby.decision),
+                self.now()?,
+            )
+            .await?)
     }
 
     /// Insert a device-created digest. The caller authorizes the schema field;
@@ -418,10 +539,11 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         field: &str,
         fingerprint: cpns::Fingerprint,
     ) -> Result<Pin> {
-        self.run(async |_| {
+        let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        async {
             let row = self.authenticated(auth, self.now()?).await?;
             Ok(self.pins.pin(row.subject(), field, fingerprint).await?)
-        })
+        }
         .await
     }
 
@@ -435,41 +557,42 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         replacement: cpns::Fingerprint,
         token: &V::Token,
     ) -> Result<Pin> {
-        self.run(async |_| {
+        let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        async {
             let row = self.authenticated(auth, self.now()?).await?;
             Ok(self
                 .pins
                 .change(row.subject(), field, expected, replacement, token)
                 .await?)
-        })
+        }
         .await
     }
 
     /// Read the current fingerprint and revision, without access history.
     pub async fn get_pin(&self, auth: &Authentication, field: &str) -> Result<Option<Pin>> {
-        self.run(async |_| {
+        async {
             let row = self.authenticated(auth, self.now()?).await?;
             Ok(self.pins.get(row.subject(), field).await?)
-        })
+        }
         .await
     }
 
     /// Read the current register record for credential issuance or the lobby.
     /// The outer service must validate the coarse lease before granting access.
     pub async fn member(&self, auth: &Authentication) -> Result<Option<crgs::Member>> {
-        self.run(async |_| {
+        async {
             let row = self.authenticated(auth, self.now()?).await?;
             Ok(self.register.member(&row.member_id()).await?)
-        })
+        }
         .await
     }
 
     /// Return the canonical reserved or admitted handle for the lobby.
     pub async fn handle(&self, auth: &Authentication) -> Result<Option<crgs::Handle>> {
-        self.run(async |_| {
+        async {
             let row = self.authenticated(auth, self.now()?).await?;
             self.current_handle(&row).await
-        })
+        }
         .await
     }
 
@@ -480,13 +603,15 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         auth: &Authentication,
         credential: cpky::CredentialID,
     ) -> Result<Record> {
-        self.run(async |_| {
+        let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        async {
             let row = self.authenticated(auth, self.now()?).await?;
             let keys = self.passkeys.clone();
             let user = row.user();
+            self.storage.signal_revocation(row.subject()).await?;
             blocking(move || keys.revoke(user, &credential)).await?;
             self.release_if_lost(row, self.now()?).await
-        })
+        }
         .await
     }
 
@@ -494,7 +619,8 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
     /// Physical loss cannot be inferred: the service must first revoke the keys
     /// through an authorized device protocol. There is no recovery override.
     pub async fn release(&self, user: Uuid) -> Result<Record> {
-        self.run(async |_| {
+        let _guard = crate::storage::member_lock(self.storage.community(), user).await;
+        async {
             let now = self.now()?;
             let row = self.sync(user, now).await?;
             if row.state().is_terminal() {
@@ -509,7 +635,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                 return Err(Error::Transition);
             }
             self.release_if_lost(row, now).await
-        })
+        }
         .await
     }
 
@@ -521,8 +647,9 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         auth: &Authentication,
         order: &clbs::SignedOrder,
     ) -> Result<Record> {
-        self.run(async |_| {
-            self.identity(auth)?;
+        let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        async {
+            self.identity(auth).await?;
             let row = self
                 .enrol_store
                 .load(auth.member())
@@ -533,9 +660,10 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
             {
                 return Err(Error::Identity);
             }
+            self.storage.signal_revocation(row.subject()).await?;
             self.legal.self_ban(order).await?;
             self.sync(row.user(), self.now()?).await
-        })
+        }
         .await
     }
 
@@ -545,126 +673,19 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         if !(1..=1000).contains(&limit) {
             return Err(Error::InvalidInput);
         }
-        self.run(async |_| {
+        async {
             let now = self.now()?;
-            self.enrol.expire_due(now, limit).await?;
-            self.enrol.cleanup(&self.register, limit).await?;
+            for row in self.enrol_store.due(now / 86400, limit).await? {
+                let _guard =
+                    crate::storage::member_lock(self.storage.community(), row.user()).await;
+                self.sync(row.user(), now).await?;
+            }
+            self.enrol.cleanup(self.register.as_ref(), limit).await?;
             self.register.release_expired(date(now)?, limit).await?;
+            self.storage.prune_probation(now as u64, limit).await?;
             Ok(())
-        })
-        .await
-    }
-
-    /// Recover a crash ONLY after all service writers and blocking workers using
-    /// this community have stopped. Run once under an external startup/recovery
-    /// leader; concurrent recovery or recovery of a live worker is unsupported.
-    /// No lock is stolen on a timeout. Errors leave the marker intact.
-    /// A recovered receipt is historical completion, never an access grant: cmnt
-    /// must obtain a current lobby verdict before issuing a credential.
-    pub async fn recover_after_quiescence(&self) -> Result<()> {
-        let checkpoint = self.storage.load().await?;
-        let Some(operation) = &checkpoint.operation else {
-            return Ok(());
-        };
-        let now = self.now()?;
-        match operation {
-            Operation::Busy => {}
-            Operation::Reservation {
-                user,
-                display,
-                skeleton,
-            } => {
-                let before = self
-                    .enrol_store
-                    .load(*user)
-                    .await?
-                    .ok_or(Error::Unavailable)?;
-                self.check_record(&before)?;
-                let deadline = before.expires_at();
-                if before.state().is_terminal() || deadline.is_some_and(|end| now >= end) {
-                    self.register
-                        .cancel_reservation(&before.member_id(), skeleton)
-                        .await?;
-                    self.enrol.get(before.user(), now).await?;
-                } else {
-                    let deadline = deadline.ok_or(Error::Unavailable)?;
-                    let result = self
-                        .register
-                        .reserve_handle(
-                            crgs::Reservation {
-                                member_id: before.member_id(),
-                                handle: crgs::Handle::new(display, skeleton)?,
-                                expires_at: date(deadline)?,
-                            },
-                            date(now)?,
-                        )
-                        .await;
-                    match result {
-                        Ok(receipt) => {
-                            self.enrol
-                                .apply(&before, Event::HandleReserved(&receipt), now)
-                                .await?;
-                        }
-                        Err(crgs::Error::Storage) => return Err(Error::Unavailable),
-                        // A crash may follow a known register refusal before its
-                        // marker was cleared. No receipt exists in that case.
-                        Err(_) => {}
-                    }
-                }
-            }
-            Operation::Admission {
-                user,
-                lease_year,
-                lease_month,
-            } => {
-                let before = self
-                    .enrol_store
-                    .load(*user)
-                    .await?
-                    .ok_or(Error::Unavailable)?;
-                self.check_record(&before)?;
-                if !before.state().is_terminal()
-                    && let Some(member) = self.register.member(&before.member_id()).await?
-                    && member.lease_end >= crgs::YearMonth::new(*lease_year, *lease_month)?
-                {
-                    // This marker is written only after a verified positive policy
-                    // decision. Finish its receipt before cnrl can expire it.
-                    let logical = before.expires_at().map_or(now, |end| now.min(end - 1));
-                    let lease_start = chrono::NaiveDate::from_ymd_opt(
-                        member.lease_end.year().into(),
-                        member.lease_end.month().into(),
-                        1,
-                    )
-                    .ok_or(Error::Unavailable)?
-                    .and_hms_opt(0, 0, 0)
-                    .ok_or(Error::Unavailable)?
-                    .and_utc()
-                    .timestamp();
-                    let logical = logical.min(lease_start);
-                    let decision = crbk::Decision {
-                        allowed: true,
-                        missing: Vec::new(),
-                    };
-                    self.enrol
-                        .apply(
-                            &before,
-                            if member.handle.is_none() {
-                                Event::RegisterReleased(&member)
-                            } else {
-                                Event::AdmissionRecorded {
-                                    member: &member,
-                                    decision: &decision,
-                                }
-                            },
-                            logical,
-                        )
-                        .await?;
-                }
-            }
         }
-        self.storage
-            .compare_exchange(&checkpoint, &checkpoint.next(None)?)
-            .await
+        .await
     }
 
     fn now(&self) -> Result<i64> {
@@ -672,9 +693,16 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         date(now)?;
         Ok(now)
     }
-    fn identity(&self, auth: &Authentication) -> Result<()> {
+    async fn identity(&self, auth: &Authentication) -> Result<()> {
         if auth.community() != self.storage.community() {
             Err(Error::Identity)
+        } else if !self
+            .credentials(auth.member())
+            .await?
+            .iter()
+            .any(|key| key.credential_id() == auth.credential_id() && !key.is_revoked())
+        {
+            Err(Error::Passkey)
         } else {
             Ok(())
         }
@@ -698,9 +726,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                 .await?
                 .and_then(|member| member.handle));
         }
-        let mut tx = self.register_store.begin().await?;
-        let reservation = tx.reservation(&row.member_id()).await?;
-        tx.commit().await?;
+        let reservation = self.register.reservation(&row.member_id()).await?;
         Ok(reservation.map(|reservation| reservation.handle))
     }
     async fn unrestricted(&self, subject: &str) -> Result<()> {
@@ -710,8 +736,14 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         }
     }
     async fn authenticated(&self, auth: &Authentication, now: i64) -> Result<Record> {
-        self.identity(auth)?;
-        self.live(auth.member(), now).await
+        self.identity(auth).await?;
+        let row = self.enrol.view(auth.member(), now).await?;
+        self.check_record(&row)?;
+        self.unrestricted(row.subject()).await?;
+        if row.state().is_terminal() {
+            return Err(Error::Transition);
+        }
+        Ok(row)
     }
     async fn live(&self, user: Uuid, now: i64) -> Result<Record> {
         let row = self.sync(user, now).await?;
@@ -746,6 +778,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                     .record(&restriction.order_id)
                     .await?
                     .ok_or(Error::Unavailable)?;
+                self.storage.signal_revocation(row.subject()).await?;
                 row = self
                     .enrol
                     .apply(&row, Event::Restriction(&record), now)
@@ -778,40 +811,87 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
         }
         Ok(self.enrol.apply(&row, Event::AllPasskeysLost, now).await?)
     }
-    async fn prepare(&self, current: &mut Checkpoint, operation: Operation) -> Result<()> {
-        let next = current.next(Some(operation))?;
-        self.storage.compare_exchange(current, &next).await?;
-        *current = next;
-        Ok(())
-    }
-    async fn register_error<T>(
+}
+
+impl<
+    S: Storage + 'static,
+    V: ChangeTokenVerifier + 'static,
+    L: clbs::Verifier + 'static,
+    C: clbs::Clock + 'static,
+> cplc::MembershipSource for Membership<S, V, L, C>
+{
+    type Lease = tokio::sync::OwnedMutexGuard<()>;
+    async fn membership(
         &self,
-        checkpoint: &mut Checkpoint,
-        error: crgs::Error,
-    ) -> Result<T> {
-        let error = Error::from(error);
-        if error != Error::Unavailable {
-            self.prepare(checkpoint, Operation::Busy).await?;
+        member: &str,
+        now: u64,
+    ) -> cplc::Result<(cplc::MembershipFacts, Self::Lease)> {
+        let read: Result<_> = async {
+            let now_i64 = i64::try_from(now).map_err(|_| Error::InvalidInput)?;
+            if self.now()? != now_i64 {
+                return Err(Error::InvalidInput);
+            }
+            let row = self
+                .enrol_store
+                .load_subject(member)
+                .await?
+                .ok_or(Error::Transition)?;
+            let guard = crate::storage::member_lock(self.storage.community(), row.user()).await;
+            let row = self.enrol.view(row.user(), now_i64).await?;
+            self.unrestricted(row.subject()).await?;
+            if row.state() != State::Admitted
+                || !self
+                    .credentials(row.user())
+                    .await?
+                    .iter()
+                    .any(|key| !key.is_revoked())
+            {
+                return Err(Error::Transition);
+            }
+            if self.storage.revocation_pending(member).await? {
+                return Err(Error::Restricted);
+            }
+            self.storage.clear_passed_probation(member, now).await?;
+            let probation_until = self
+                .storage
+                .probation(member)
+                .await?
+                .ok_or(Error::Transition)?;
+            let registered = self
+                .register
+                .member(&row.member_id())
+                .await?
+                .ok_or(Error::Transition)?;
+            if registered.handle.is_none() {
+                return Err(Error::Transition);
+            }
+            let start = chrono::NaiveDate::from_ymd_opt(
+                registered.lease_end.year().into(),
+                registered.lease_end.month().into(),
+                1,
+            )
+            .ok_or(Error::InvalidInput)?;
+            let end = start
+                .checked_add_months(chrono::Months::new(1))
+                .ok_or(Error::InvalidInput)?;
+            let lease_end = end
+                .and_hms_opt(0, 0, 0)
+                .ok_or(Error::InvalidInput)?
+                .and_utc()
+                .timestamp();
+            Ok((
+                cplc::MembershipFacts {
+                    community: self.storage.community().into(),
+                    member: member.into(),
+                    state: row.state().membership(),
+                    probation_until,
+                    lease_end: lease_end as u64,
+                },
+                guard,
+            ))
         }
-        Err(error)
-    }
-    async fn run<T>(&self, operation: impl AsyncFnOnce(&mut Checkpoint) -> Result<T>) -> Result<T> {
-        let idle = self.storage.load().await?;
-        if idle.is_busy() {
-            return Err(Error::Busy);
-        }
-        let mut checkpoint = idle.next(Some(Operation::Busy))?;
-        self.storage.compare_exchange(&idle, &checkpoint).await?;
-        let result = operation(&mut checkpoint).await;
-        if result.is_ok()
-            || (result.as_ref().err() != Some(&Error::Unavailable)
-                && checkpoint.operation == Some(Operation::Busy))
-        {
-            self.storage
-                .compare_exchange(&checkpoint, &checkpoint.next(None)?)
-                .await?;
-        }
-        result
+        .await;
+        read.map_err(|_| cplc::Error::Invalid("membership source unavailable"))
     }
 }
 

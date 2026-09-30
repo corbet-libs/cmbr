@@ -34,22 +34,18 @@ throttling, snapshot freshness and credential issuance remain with the outer doo
 
 ## Coordination and recovery
 
-One durable CAS slot serializes operations within a community across processes.
-It holds only a generation and the current unfinished operation, with no clock,
-request history or member identity when idle. Register reservation and admission
-intents are persisted before their leaf transaction; receipts are completed before
-expiry, cleanup or another admission may run. Independent communities do not block
-each other. Single-community operations are deliberately serialized for now.
+cmbr uses per-member queues, with no community-wide or durable Busy lock.
+Reservation and admission complete in owned tasks after caller cancellation.
+Read-only and unauthenticated lookups take no write lock. Leaves retain their
+atomic revision and uniqueness checks. Failed cross-leaf operations require a
+fresh authorized retry; no recovery path fabricates a positive decision.
 
-There is no cross-leaf SQL transaction and no automatic lock expiry. Cancellation,
-a process crash or an ambiguous database result keeps the slot busy. Stop all
-writers **including blocking workers**, elect one recovery worker externally, and
-call `recover_after_quiescence` before reopening traffic. Recovery completes a
-committed admission receipt before applying pending expiry, cancels an expired
-reservation, and retains the marker if reconciliation fails. It does not grant
-access using a stale decision. Run a fresh lobby decision before credential issue.
-All writers, including maintenance, must use this facade; directly writing leaf
-stores bypasses this coordination boundary.
+Admission accepts cplc verified settings and cgts checked witnesses. cplc owns
+the decision and reads cmbr's stored day probation and bounded lease to issue.
+The pure lobby returns no-return expiry and second-device/synced-passkey warnings.
+Revoked-passkey sessions stop immediately; a durable outbox carries security
+changes to cplc before further credentials can be signed.
+
 
 ## Dependency survey
 
@@ -89,7 +85,7 @@ Never publish this crate to a registry.
 
 Open: production spent-token and intent-bound self-ban verifier adapters; approved
 additional-device registration and session invalidation; discoverable login in
-cpky; automatic fenced recovery/shared leaf transactions for higher concurrency.
+cpky; full private balance extension proofs before activating change-token gates.
 No raw gate data, login dates, device names or request logs are stored. Dependency
 SQL/HTTP tracing and proxy body logging must stay disabled in the service.
 

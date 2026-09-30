@@ -1,154 +1,119 @@
-# Implemented cmbr contract
+# cmbr implemented contract
 
-cmbr is the FSL-1.1-ALv2 membership facade under cvld v0.4's community facade,
-cmnt. It composes crgs (register), cpky (passkeys), cnrl (enrolment), cpns (pins),
-with clbs restrictions, crbk decisions and cgrd handle validation. Rust native
-server code, current stable compiler. No own cryptography, leaf state machine,
-Unicode normalization, register policy, passkey verifier or pin-change executor.
+cmbr composes community enrolment (cnrl), passkeys (cpky), handles and leases
+(crgs), pins (cpns), and legal restrictions (clbs). cplc alone decides admission;
+cmnt wires the facades. Leaves own their cryptography, lifecycle transitions and
+atomic writes. Services select trusted storage/verifiers and authenticate routes.
+No raw gate evidence, secrets, login times, request logs or history are retained.
 
-## Binding lifecycle and API
+## Admission and identity
 
-Started → passkey registered → handle reserved → gates in progress → admitted
-⇄ lapsed → released. Pending registrations expire at cnrl's fixed coarse deadline
-and free reservations. Terminal rows cannot be revived. There is no recovery of
-lost identity. Handles remain under crgs's committed coarse lease/release policy,
-normally 24 months after the lease; self-ban does not immediately free them.
+`admit` and `lapse` require cplc's policy owner, opaque `VerifiedSnapshot` and
+cgts `CheckedGates`. The member's current stored lifecycle supplies the crbk
+membership state. cplc checks publication freshness, scope, effective epoch,
+revocations and exact gate bindings. Raw snapshots, gate arrays and caller-built
+positive decisions cannot enter this API. cmbr contains no policy evaluator.
+Admission requires the reserved handle, a current legal check and a bounded lease.
+`Config::lease_months` is 1–24; requests beyond current month plus that bound fail.
+The stored lease is coarse through the end of its calendar month.
 
-- `begin_registration` / `finish_registration`: first credential only; call cpky,
-  commit its verification material and apply the actual receipt to cnrl. An
-  existing identity never accepts a new credential through unauthenticated retry.
-  A later lookup reconciles a committed passkey whose enrolment receipt was lost.
-- `begin_login` / `finish_login`: account-first WebAuthn, UV required, monotonic
-  counter/revocation rules delegated to cpky. Pending states are opaque, consumed
-  once, instance-bound and ephemeral. Success returns authentication and lobby
-  state, with no login timestamp or implicit lease extension.
-- `enrolment_state` is trusted orchestration. `resume` requires cpky's opaque
-  authentication and enforces its community/user binding. All passkeys for that
-  UUID resolve to one stable pseudonym in cnrl.
-- `reserve_handle` validates with cgrd using the current trusted reserved list,
-  reserves crgs's unique skeleton until exactly cnrl's deadline, then records
-  that receipt. `handle` returns that canonical reservation or the active handle;
-  `member` returns the current register record for lease/role checks. Admission
-  reads the stored handle directly, so callers cannot substitute its skeleton.
-  No independent or sliding reservation lifetime exists.
-- `lobby` calls cnrl/crbk with verified proof metadata and current signed-policy
-  content; returns current state and missing requirements, storing neither gates
-  nor the verdict. `admit` reevaluates inside serialization, requires a positive
-  decision and legal clearance, commits crgs admission/lease renewal, and sends
-  the receipt to cnrl. Initial role is Member; this API cannot assign admin/root.
-  `lapse` requires a fresh negative rulebook decision. Re-admission is explicit.
-- `pin`, `get_pin`, `change_pin` call cpns. Only fingerprint and revision are
-  stored; no values, salts, token evidence or history. Changes require a verified
-  completed spend bound to community, member, field, old digest/revision and new
-  digest. cpns's revision CAS protects replay; errors never imply a refund.
-- `revoke_passkey` revokes an owned credential in cpky. Last-key revocation and
-  `release` consume cnrl's lost-key event. Release refuses with live credentials.
-  Physical loss detection and authorization to revoke belong to the service.
-- `self_ban` binds the signed order to the authenticated pseudonym and calls clbs's
-  fresh intent-bound verifier before applying its immutable restriction. A normal
-  authentication result is not self-ban evidence. Exact retries still verify.
-- `maintain` bounds pending expiry, owner-safe reservation cancellation and crgs
-  retention release, serialized against admission. Released register records are
-  consumed on subsequent state/resume. Schedule maintenance without user activity.
+Every authenticated operation checks the exact credential ID carried by cpky's
+opaque Authentication against its current unrevoked record. Supplying another
+credential ID cannot rescue a session from a revoked passkey. Revoking the last
+passkey permanently releases the lifecycle; it does not erase a retained handle.
+Account-first login delegates verification/counters to cpky and records no login
+time. UUIDs and pseudonyms are service-authenticated community-local bindings.
 
-## Authority and identity
+## No return and lobby
 
-The API is trusted in-process composition, never an untrusted RPC surface. The
-service verifies global presentations, allocates community-local nonnil UUIDs,
-chooses canonical pseudonym text, and protects registration sessions. cnrl's
-unique constraints prevent one user rebinding or two users claiming one pseudonym.
-crgs uses exactly that text's UTF-8 bytes; no global identifier is stored or derived.
+The product rule is **NO RETURN**. Expired registration, loss of all passkeys,
+self-ban and permanent termination leave a permanent pseudonym tombstone. That
+person can never join this community again, including under another passkey UUID.
+Global uniqueness fingerprints are also burned permanently and never released.
+There is no recovery override, recycle or identity-deletion route.
 
-All leaf stores are constructed privately from the same Db and fixed coordinator
-scope. Deploy one database per community. The service must also ensure that the
-coordinator refers to that same database; supplying a separate coordinator for
-each instance defeats serialization. Direct leaf writes are outside the contract.
-The outer service must preserve signature/freshness checks on policy and gate
-inputs, reserved names, schema-field authorization, registration throttling and
-session/device approval. Authentication is an in-process receipt, not an expiring
-bearer token; cpky cannot invalidate previously returned receipts. Session renewal
-and immediate invalidation on device removal belong to cmnt/cvld.
+`lobby` reads a pure cnrl view and cplc's decision. It never applies a policy,
+lapses an admitted member, expires a row, cleans claims or renews a lease.
+A negative lobby response leaves stored admission unchanged; `lapse` is explicit.
+Before registration expires the response always carries its exclusive UTC-day
+deadline and warning that expiration permanently prevents rejoining. With exactly
+one live passkey it recommends registering a second device or using a synced
+passkey. Clients must present these warnings. Periodic maintenance owns expiry
+and claim cleanup even if a member never opens the lobby.
 
-clbs's configured membership action is checked before live membership operations.
-Its permanent restrictions release the lifecycle and temporary restrictions lapse
-it. Errors fail closed. Outer cgts still checks the exact requested action before
-every service action. External legal writers must coordinate with the service if
-an order must cancel a concurrent action; clbs checks are point-in-time reads.
-Self-ban retries may enter after a veto so they can verify/reconcile the same order.
-An enrolment state is never an access credential; current lease, gates, policy and
-revocation must be checked before the outer service signs one.
+## Concurrency and failure
 
-## Transaction coordination
+There is no community-wide lock or durable Busy marker. Mutations serialize by
+community/member UUID in a short-lived process queue shared across facade
+instances; unrelated members proceed independently. Authentication reads, lobby,
+handle availability, member and pin reads do not acquire that queue or a database
+write transaction. crgs's read capability refuses writes. Services share one crlt
+pool and configure sufficient connection leases for concurrent operations.
 
-`Storage` defines fixed community, load and strict atomic compare/exchange.
-`MemoryStorage` shares a mutex; `LibsqlStorage` uses crlt immediate transactions.
-`cmbr_coordination` has a primary key `(community_id, slot)` and a single fixed
-slot per community. Exact retries of CAS fail, ensuring only one caller owns it.
-A monotonically increasing generation prevents ABA. Indexed queries select/update
-that exact slot; literal insertion scans nothing. crlt enforces all query plans.
+Reservation and admission use owned Tokio tasks. Once started, caller cancellation
+does not interrupt their cross-leaf completion. Queue guards release on success,
+error, cancellation and process exit. Storage/clock failures cannot leave a
+member or community locked. Leaf CAS revisions and unique indexes fence competing
+writes across processes. A mutation may still have an uncertain remote result:
+read current leaf state and retry with fresh authorization. Partial registration
+receipts can be reconciled from committed cpky records by explicit synchronization.
 
-Every operation first commits an occupied slot. It holds no timestamp, timer,
-request ID or idle member identity. Reservation/admission operations replace it
-with a minimal intent and user reference before touching crgs. Admission intents
-also retain the requested coarse lease. Recovery loads cnrl's validated current
-record instead of persisting or trusting a duplicate lifecycle snapshot. This
-is current unfinished work, removed on completion, not a request/event ledger.
-It prevents cnrl expiry or release from racing a committed register operation
-whose receipt has not reached cnrl. Known register refusals clear their intent;
-ambiguous outcomes and cancellation keep the slot occupied. A crashed single-leaf
-operation can be reconciled from that leaf's current state. cpky worker execution
-may outlive cancellation, so stopping only its calling task is insufficient.
+There is no synthetic positive recovery decision. A register row alone cannot
+readmit a lapsed member. After a process loss or failed admission, a retry must
+obtain current cplc authorization. If a pending registration expires before it
+finishes, the permanent no-return rule applies. All facades' service writers must
+respect the owning APIs; raw database administration remains privileged.
 
-There is no shared SQL transaction across leaves and no automatic lock timeout.
-`recover_after_quiescence` is a trusted startup/admin operation: stop every writer
-and outstanding blocking worker for that community, establish one external recovery
-leader, then call it before serving traffic. Calling it while a writer is live or
-running multiple recoverers violates the contract. It never spends tokens, replays
-WebAuthn responses or accepts new admission from a stale policy decision.
+## Probation and credential facts
 
-Reservation recovery replays the exact idempotent reservation while its deadline
-is live, or cancels that owner's reservation and expires cnrl after the deadline.
-Admission recovery reads crgs: absence or a lease below the requested target
-means no completed admission/renewal; a matching record supplies the receipt. The intent proves that the facade already obtained
-a positive decision. For an interrupted pending admission it completes cnrl at
-`min(now, pending_deadline - 1, lease_month_start)` so expiry cannot override a
-committed admission, including recovery after the coarse lease has elapsed.
-For renewal there is no pending cutoff; the lease bound still applies.
-This logical reconciliation point is not stored as a timestamp and grants no
-current access. Current policy/legal/lease evaluation is required afterwards.
-A failed reconciliation leaves the intent intact and fails closed.
+The first completed admission initializes `probation_until` from the authenticated
+crbk `membership.probation_days` setting (default 14), at a UTC-day boundary.
+It never slides on renewal. After it passes, issuance or bounded maintenance
+removes the deadline; the initialized row remains so probation cannot restart.
+No admission or login timestamp is saved. cplc reads this source to select the
+crbk new/established credential caps (defaults 1/30 days); callers choose no class.
 
-A remote write error can have an uncertain outcome. Do not clear a busy marker on
-elapsed time, refund a spend, reset a pin revision, erase tombstones or restore an
-old database while credentials/spends survive. Such operations require external
-coordinated invalidation. Higher concurrency and automatic fenced recovery await
-shared transaction support in the leaves.
+The `MembershipSource` implementation reads live admitted state, passkeys, legal
+eligibility, probation and the register's exclusive lease end. Its per-member
+lease guard survives through cplc signing, so revocation cannot race that check.
+Pending, lapsed, terminal, keyless or incomplete membership never produces a
+credential. Signing is refused while an unforwarded revocation is pending.
 
-## Persistence, privacy and verification
+## Revocations
 
-The composition root adds `SCHEMAS` to its complete migration list and supplies
-crlt credentials. No library reads environment credentials. All tables retain
-community keys and all queries are index-backed, including shared-DB isolation
-tests. Migrations have no activity timestamps. Persistent state is current
-membership, identity binding, passkey verification data, handle/lease, pins, legal
-metadata owned by clbs, and current coordination work. No login dates, request
-logs, raw gate data, profile values, salts or member event history are recorded.
-Errors are fixed categories without leaf sources or sensitive context. Keep
-upstream tracing and service request/body logging disabled.
+Security changes write a durable revocation request before changing the leaf.
+cmnt drains `revocations`, advances cplc's epoch, publishes fresh trust/revocation
+state, then acknowledges the exact generation. Advancing the epoch invalidates
+all old community credentials, including any removed device key. A newer event
+cannot be erased by an older acknowledgement, including after a prior drain.
+Conservative invalidation after a failed leaf operation is safe. Generation rows
+remain, without times or event history, to prevent acknowledgement replay.
+Permanent member revocations additionally belong in cplc's revoked-member set.
 
-Tests use actual libSQL files, WebAuthn software authenticators, real signed clbs
-fixtures, real cnrl/crgs/cpns logic, CAS races and crash/restart reconciliation.
-Memory coordination exercises the same contract. A development gate is test-only.
-External verifier fixtures are not production change-token or legal protocols.
-Turso tests run only with both environment variables set, against disposable data;
-public CI receives neither. All Cargo checks run on GitHub Actions; no registry
-publication. Production cblc-to-cpns spend binding and the approved additional-device
-and fresh self-ban protocols remain explicit integration boundaries.
+## Pins and storage
 
-## Door queries
+Pin values and salts stay on devices. cpns owns fingerprint algorithms, exact
+expected digest/revision checks and change authorization. Initial pins never
+overwrite an existing field. Changes require an already spent token bound to the
+entire cpns Change; unproven balance extensions remain disabled in cgts.
 
-`is_handle_available` applies the existing guard and register reservation/lease
-rules without exposing an owner. Throttle it before calling. `session_is_active`
-revalidates the exact credential behind an opaque authentication receipt; revoking
-that credential invalidates its sessions even if another passkey remains active.
-Both operations use the existing facade coordinator and fixed community scope.
+| Table | Current content | Index |
+|---|---|---|
+| cmbr_probation | Pseudonym and optional day probation end | community_id, subject; expiry index |
+| cmbr_revocations | Pseudonym, monotonic generation and pending bit | community_id, subject; pending index |
+
+Other tables remain leaf-owned. All queries are community-scoped and indexed;
+crlt enforces plans. Services own migrations, secret provisioning and one database
+per community. The old coordination table is not used and must not be treated as
+an active lock during migration. Apply the new schema through a new service-owned
+migration when upgrading an existing database. Errors and Debug diagnostics omit
+member identifiers and provider/SQL details. No leaf writers are re-exported.
+
+## Validation
+
+GitHub Actions runs formatting, strict Clippy, real WebAuthn ceremonies, actual
+libSQL transactions, rulebook and signing flows, opaque witness rejection,
+concurrent reads, cancelled cross-leaf work, storage/clock errors, revoked-session
+checks, no-return cases, probation and durable revocation tests. CI rejects
+floating or duplicated corbet dependency revisions. No Cargo runs locally.
+Optional Turso tests require an explicitly configured disposable database.

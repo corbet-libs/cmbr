@@ -5,7 +5,6 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 
-use cmbr::{clbs, cpky, cpns, crbk, crgs, crlt};
 use cpky::Uuid;
 use ed25519_dalek::{Signer, SigningKey};
 use webauthn_authenticator_rs::{AuthenticatorBackend, softtoken::SoftToken};
@@ -41,7 +40,7 @@ pub fn date(time: i64) -> chrono::DateTime<chrono::Utc> {
 }
 pub fn handle() -> crgs::Handle {
     {
-        let checked = cmbr::cgrd::check_handle(HANDLE, &[]).unwrap();
+        let checked = cgrd::check_handle(HANDLE, &[]).unwrap();
         crgs::Handle::new(checked.normalized, checked.skeleton).unwrap()
     }
 }
@@ -123,6 +122,7 @@ pub type Facade = cmbr::Membership<cmbr::LibsqlStorage, Spends, Verify, Clock>;
 pub fn config() -> cmbr::Config {
     cmbr::Config {
         pending_days: 2,
+        lease_months: 12,
         membership_action: "membership".into(),
         release_period: crgs::ReleasePeriod::default(),
         rp_id: "members.example.org".into(),
@@ -141,7 +141,9 @@ pub fn facade(db: &crlt::Db, community: &str, clock: Clock) -> Facade {
     .unwrap()
 }
 pub async fn open(url: &str, token: &str) -> crlt::Db {
-    let db = crlt::Db::open(crlt::Config::new(url, token)).await.unwrap();
+    let mut config = crlt::Config::new(url, token);
+    config.max_connections = 4;
+    let db = crlt::Db::open(config).await.unwrap();
     let migrations: Vec<_> = cmbr::SCHEMAS
         .iter()
         .enumerate()
@@ -175,7 +177,7 @@ pub async fn register(facade: &Facade, user: Uuid, subject: &str) -> SoftToken {
             .await
             .unwrap()
             .state(),
-        cmbr::cnrl::State::PasskeyRegistered
+        cnrl::State::PasskeyRegistered
     );
     device
 }
@@ -244,10 +246,195 @@ pub async fn pending(facade: &Facade, community: &str) -> (SoftToken, cmbr::Logi
         .await
         .unwrap();
     let (row, decision) = facade
-        .lobby(&login.authentication, &policy(community), &[])
+        .lobby_test(&login.authentication, &policy(community), &[])
         .await
         .unwrap();
-    assert_eq!(row.state(), cmbr::cnrl::State::GatesInProgress);
+    assert_eq!(row.state(), cnrl::State::HandleReserved);
     assert!(!decision.allowed);
     (device, login)
+}
+
+pub type Policy = cplc::Policy<crbk::MemoryStore, cplc::MemoryStore, cplc::csgn::MemoryStore>;
+pub async fn verified_policy(snapshot: &crbk::Snapshot, at: i64) -> Policy {
+    let mut book = crbk::Rulebook::default();
+    for (key, value) in &snapshot.content {
+        book.define(
+            key,
+            crbk::Setting {
+                value_type: if key == &crbk::action_key("membership") {
+                    crbk::SettingType::Policy
+                } else if value.is_boolean() {
+                    crbk::SettingType::Boolean
+                } else {
+                    crbk::SettingType::Integer
+                },
+                nullable: false,
+                default: value.clone(),
+                bounds: crbk::Bounds::default(),
+                lowest_layer: crbk::Layer::Community,
+                kind: crbk::SettingKind::Technical,
+            },
+        )
+        .unwrap();
+    }
+    let signer = cplc::csgn::PersistentSigner::create(
+        cplc::csgn::MemoryStore::default(),
+        &snapshot.community,
+        cplc::csgn::SecretKey::from_seed(&mut [18; 32]),
+        cplc::day(at as u64),
+        30 * cplc::DAY,
+    )
+    .await
+    .unwrap();
+    let mut policy = cplc::Policy::create(
+        crbk::MemoryStore::default(),
+        cplc::MemoryStore::new(&snapshot.community).unwrap(),
+        signer,
+        cplc::Config {
+            credential_action: "membership".into(),
+            snapshot_validity: cplc::DAY,
+        },
+    )
+    .await
+    .unwrap();
+    policy
+        .schedule_rules(
+            None,
+            crbk::Change {
+                rulebook: book,
+                announced_at: at,
+                effective_at: at,
+                notice_seconds: 0,
+                policy_epoch: 1,
+            },
+        )
+        .await
+        .unwrap();
+    policy
+}
+struct FixtureGate(crbk::GateResult);
+impl cgts::Gate for FixtureGate {
+    type Input = ();
+    fn descriptor(&self) -> cgts::Descriptor {
+        cgts::Descriptor {
+            gate: self.0.gate.clone(),
+            level: self.0.level,
+            provider: self.0.provider.clone(),
+            steps: vec![cgts::Step {
+                id: "fixture".into(),
+                description: "Synthetic provider fixture".into(),
+                input: "unit".into(),
+            }],
+        }
+    }
+    async fn verify(&self, context: cgts::Context<'_>, _: &()) -> cgts::Result<cgts::Proof> {
+        if self.0.subject != context.subject
+            || self.0.community.as_deref() != Some(&context.snapshot.community)
+        {
+            return Err(cgts::Error::Scope);
+        }
+        Ok(cgts::Proof::transient(self.0.valid_until))
+    }
+}
+#[derive(Clone)]
+struct NoOrders;
+impl clbs::Verifier for NoOrders {
+    async fn verify_legal(&self, _: &clbs::SignedOrder) -> clbs::Result<()> {
+        Err(clbs::Error::Denied)
+    }
+    async fn verify_self_ban(&self, _: &clbs::SignedOrder) -> clbs::Result<()> {
+        Err(clbs::Error::Denied)
+    }
+}
+pub async fn checked(
+    snapshot: &cplc::VerifiedSnapshot,
+    subject: &str,
+    gates: &[crbk::GateResult],
+    at: i64,
+) -> cgts::CheckedGates {
+    let keeper = cgts::Gatekeeper::new(
+        cgts::MemoryStore::new(&snapshot.settings().community).unwrap(),
+        cgts::LegalGate::new(
+            clbs::MemoryStore::new(&snapshot.settings().community).unwrap(),
+            NoOrders,
+        ),
+    )
+    .unwrap();
+    let context = cgts::Context {
+        snapshot: snapshot.settings(),
+        subject,
+        action: "membership",
+        now: at,
+    };
+    let mut checked = Vec::new();
+    for gate in gates {
+        checked.push(
+            keeper
+                .run(context, &FixtureGate(gate.clone()), &())
+                .await
+                .unwrap(),
+        );
+    }
+    keeper.check(context, checked).await.unwrap()
+}
+pub trait TestApi {
+    async fn admit_test(
+        &self,
+        auth: &cpky::Authentication,
+        raw: &crbk::Snapshot,
+        gates: &[crbk::GateResult],
+        lease: crgs::YearMonth,
+    ) -> cmbr::Result<cnrl::Record>;
+    async fn lobby_test(
+        &self,
+        auth: &cpky::Authentication,
+        raw: &crbk::Snapshot,
+        gates: &[crbk::GateResult],
+    ) -> cmbr::Result<(cnrl::Record, crbk::Decision)>;
+    async fn lapse_test(
+        &self,
+        auth: &cpky::Authentication,
+        raw: &crbk::Snapshot,
+        gates: &[crbk::GateResult],
+    ) -> cmbr::Result<cnrl::Record>;
+}
+impl TestApi for Facade {
+    async fn admit_test(
+        &self,
+        auth: &cpky::Authentication,
+        raw: &crbk::Snapshot,
+        gates: &[crbk::GateResult],
+        lease: crgs::YearMonth,
+    ) -> cmbr::Result<cnrl::Record> {
+        let row = self.resume(auth).await?;
+        let mut policy = verified_policy(raw, now()).await;
+        let snapshot = policy.verified_settings(now() as u64).await.unwrap();
+        let gates = checked(&snapshot, row.subject(), gates, now()).await;
+        self.admit(auth, &policy, &snapshot, &gates, lease).await
+    }
+    async fn lobby_test(
+        &self,
+        auth: &cpky::Authentication,
+        raw: &crbk::Snapshot,
+        gates: &[crbk::GateResult],
+    ) -> cmbr::Result<(cnrl::Record, crbk::Decision)> {
+        let row = self.resume(auth).await?;
+        let mut policy = verified_policy(raw, now()).await;
+        let snapshot = policy.verified_settings(now() as u64).await.unwrap();
+        let gates = checked(&snapshot, row.subject(), gates, now()).await;
+        let lobby = self.lobby(auth, &policy, &snapshot, &gates).await?;
+        Ok((lobby.enrolment, lobby.decision))
+    }
+    async fn lapse_test(
+        &self,
+        auth: &cpky::Authentication,
+        raw: &crbk::Snapshot,
+        gates: &[crbk::GateResult],
+    ) -> cmbr::Result<cnrl::Record> {
+        let row = self.resume(auth).await?;
+        let mut policy = verified_policy(raw, now()).await;
+        let snapshot = policy.verified_settings(now() as u64).await.unwrap();
+        let gates = checked(&snapshot, row.subject(), gates, now()).await;
+        self.lapse(auth, &policy, &snapshot, &gates).await
+    }
 }

@@ -735,7 +735,7 @@ dependencies = [
 [[package]]
 name = "cgts"
 version = "0.0.0"
-source = "git+https://github.com/corbet-libs/cgts?rev=09f0c250f11f894a5ee25f21672aed972f21a4a1#09f0c250f11f894a5ee25f21672aed972f21a4a1"
+source = "git+https://github.com/corbet-libs/cgts?rev=ef70f442d41041ad98f91cf8bc8041d17706c630#ef70f442d41041ad98f91cf8bc8041d17706c630"
 dependencies = [
  "cblc",
  "cgrd",
@@ -995,7 +995,7 @@ dependencies = [
 [[package]]
 name = "cplc"
 version = "0.0.0"
-source = "git+https://github.com/corbet-libs/cplc?rev=13cd44168ff0bd333431a0b77e028d4e64d6ecd1#13cd44168ff0bd333431a0b77e028d4e64d6ecd1"
+source = "git+https://github.com/corbet-libs/cplc?rev=8c91c9cce2736aa572df3ce4c50350d3ecd8683d#8c91c9cce2736aa572df3ce4c50350d3ecd8683d"
 dependencies = [
  "cgts",
  "cpsd",
@@ -1023,7 +1023,7 @@ dependencies = [
 [[package]]
 name = "cpsd"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cpsd?rev=5b2d5d9970d4beae171d85e478d06ba0b29e1992#5b2d5d9970d4beae171d85e478d06ba0b29e1992"
+source = "git+https://github.com/corbet-foss/cpsd?rev=b60f2bbff04dbe0a93cb41992006b06dafc798c3#b60f2bbff04dbe0a93cb41992006b06dafc798c3"
 dependencies = [
  "ark-bls12-381",
  "ark-ec",

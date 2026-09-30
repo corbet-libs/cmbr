@@ -11,8 +11,8 @@ publish = false
 include = ["Cargo.toml", "src/**", "docs/**", "README.md", "LICENSE.md"]
 
 [dependencies]
-cplc = { git = "https://github.com/corbet-libs/cplc", rev = "13cd44168ff0bd333431a0b77e028d4e64d6ecd1" }
-cgts = { git = "https://github.com/corbet-libs/cgts", rev = "09f0c250f11f894a5ee25f21672aed972f21a4a1" }
+cplc = { git = "https://github.com/corbet-libs/cplc", rev = "8c91c9cce2736aa572df3ce4c50350d3ecd8683d" }
+cgts = { git = "https://github.com/corbet-libs/cgts", rev = "ef70f442d41041ad98f91cf8bc8041d17706c630" }
 cgrd = { git = "https://github.com/corbet-foss/cgrd", rev = "947969cd38166f75914aa09256a6d2523990e0e4", default-features = false }
 crlt = { git = "https://github.com/corbet-foss/crlt", rev = "6b94dacd7fa04aa8847c62c6471a1fc5c0f6c9dc" }
 crgs = { git = "https://github.com/corbet-foss/crgs", rev = "b8f58b2bce71b5af5c97524fc4d709f669c43da1" }

@@ -62,6 +62,8 @@ pub(crate) enum Operation {
     },
     Admission {
         before: cnrl::Record,
+        lease_year: u16,
+        lease_month: u8,
     },
 }
 

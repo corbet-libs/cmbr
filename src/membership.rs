@@ -305,14 +305,7 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
             if lease < current_month {
                 return Err(Error::InvalidInput);
             }
-            self.prepare(
-                checkpoint,
-                Operation::Admission {
-                    before: row.clone(),
-                },
-            )
-            .await?;
-            let member = if matches!(row.state(), State::Admitted | State::Lapsed) {
+            if matches!(row.state(), State::Admitted | State::Lapsed) {
                 let member = self
                     .register
                     .member(&row.member_id())
@@ -321,6 +314,17 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                 if member.handle.as_ref() != Some(&handle) {
                     return Err(Error::Identity);
                 }
+            }
+            self.prepare(
+                checkpoint,
+                Operation::Admission {
+                    before: row.clone(),
+                    lease_year: lease.year(),
+                    lease_month: lease.month(),
+                },
+            )
+            .await?;
+            let member = if matches!(row.state(), State::Admitted | State::Lapsed) {
                 match self
                     .register
                     .extend_lease(&row.member_id(), lease, date(now)?)
@@ -347,6 +351,12 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                     Err(e) => return self.register_error(checkpoint, e).await,
                 }
             };
+            if member.handle.is_none() {
+                return Ok(self
+                    .enrol
+                    .apply(&row, Event::RegisterReleased(&member), now)
+                    .await?);
+            }
             Ok(self
                 .enrol
                 .apply(
@@ -546,12 +556,29 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                         .await?;
                 }
             }
-            Operation::Admission { before } => {
+            Operation::Admission {
+                before,
+                lease_year,
+                lease_month,
+            } => {
                 self.check_record(before)?;
-                if let Some(member) = self.register.member(&before.member_id()).await? {
+                if let Some(member) = self.register.member(&before.member_id()).await?
+                    && member.lease_end >= crgs::YearMonth::new(*lease_year, *lease_month)?
+                {
                     // This marker is written only after a verified positive policy
                     // decision. Finish its receipt before cnrl can expire it.
                     let logical = before.expires_at().map_or(now, |end| now.min(end - 1));
+                    let lease_start = chrono::NaiveDate::from_ymd_opt(
+                        member.lease_end.year().into(),
+                        member.lease_end.month().into(),
+                        1,
+                    )
+                    .ok_or(Error::Unavailable)?
+                    .and_hms_opt(0, 0, 0)
+                    .ok_or(Error::Unavailable)?
+                    .and_utc()
+                    .timestamp();
+                    let logical = logical.min(lease_start);
                     let decision = crbk::Decision {
                         allowed: true,
                         missing: Vec::new(),
@@ -559,9 +586,13 @@ impl<S: Storage, V: ChangeTokenVerifier, L: clbs::Verifier, C: clbs::Clock> Memb
                     self.enrol
                         .apply(
                             before,
-                            Event::AdmissionRecorded {
-                                member: &member,
-                                decision: &decision,
+                            if member.handle.is_none() {
+                                Event::RegisterReleased(&member)
+                            } else {
+                                Event::AdmissionRecorded {
+                                    member: &member,
+                                    decision: &decision,
+                                }
                             },
                             logical,
                         )
@@ -724,3 +755,6 @@ async fn blocking<T: Send + 'static>(
         .map_err(|_| Error::Unavailable)?
         .map_err(Into::into)
 }
+
+#[cfg(test)]
+mod tests;

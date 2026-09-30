@@ -100,8 +100,12 @@ impl From<cpns::server::Error> for Error {
     }
 }
 impl From<clbs::Error> for Error {
-    fn from(_: clbs::Error) -> Self {
-        Self::Unavailable
+    fn from(error: clbs::Error) -> Self {
+        match error {
+            clbs::Error::Storage | clbs::Error::Clock => Self::Unavailable,
+            clbs::Error::CommunityMismatch => Self::Identity,
+            _ => Self::Restricted,
+        }
     }
 }
 
@@ -112,3 +116,6 @@ pub(crate) fn text(value: &str) -> Result<()> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+extern crate self as cmbr;

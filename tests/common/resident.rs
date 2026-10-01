@@ -52,7 +52,7 @@ impl Resident {
                 .hmac_secret(HmacSecretConfig::new_with_uv_only().enable_on_make_credential());
         authenticator.set_make_credentials_with_signature_counter(true);
         let mut client = Client::new(authenticator);
-        let origin = cpky::Url::parse(origin).unwrap();
+        let origin = ckyh::Url::parse(origin).unwrap();
         let response = if create {
             serde_json::to_value(
                 client

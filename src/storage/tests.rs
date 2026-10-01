@@ -57,8 +57,8 @@ async fn libsql_coarse_facts_are_indexed_isolated_and_persistent() {
 }
 #[tokio::test]
 async fn cancellation_and_errors_drop_only_the_affected_member_guard() {
-    let a = cpky::Uuid::from_u128(1);
-    let b = cpky::Uuid::from_u128(2);
+    let a = ckyh::Uuid::from_u128(1);
+    let b = ckyh::Uuid::from_u128(2);
     let guard = member_lock("locks", a).await;
     let other = tokio::time::timeout(std::time::Duration::from_secs(1), member_lock("locks", b))
         .await

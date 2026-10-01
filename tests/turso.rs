@@ -12,7 +12,7 @@ async fn optional_real_turso() {
         return;
     }
     let db = common::open(&url, &token).await;
-    let community = format!("cmbr-test-{}", cpky::Uuid::new_v4());
+    let community = format!("cmbr-test-{}", ckyh::Uuid::new_v4());
     let facade = common::facade(&db, &community, common::Clock::new());
     let mut device = common::register(&facade, common::USER, common::SUBJECT).await;
     let login = common::login(&facade, &mut device, common::USER).await;

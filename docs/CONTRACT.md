@@ -1,6 +1,6 @@
 # cmbr implemented contract
 
-cmbr composes community enrolment (cnrl), passkeys (cpky), handles and leases
+cmbr composes community enrolment (cnrl), passkeys (ckyh), handles and leases
 (crgs), pins (cpns), and legal restrictions (clbs). cplc alone decides admission;
 cmty wires the facades. Leaves own their cryptography, lifecycle transitions and
 atomic writes. Services select trusted storage/verifiers and authenticate routes.
@@ -17,11 +17,11 @@ Admission requires the reserved handle, a current legal check and a bounded leas
 `Config::lease_months` is 1–24; requests beyond current month plus that bound fail.
 The stored lease is coarse through the end of its calendar month.
 
-Every authenticated operation checks the exact credential ID carried by cpky's
+Every authenticated operation checks the exact credential ID carried by ckyh's
 opaque Authentication against its current unrevoked record. Supplying another
 credential ID cannot rescue a session from a revoked passkey. Revoking the last
 passkey permanently releases the lifecycle; it does not erase a retained handle.
-Credential-first and discoverable login delegate verification/counters to cpky and records no login
+Credential-first and discoverable login delegate verification/counters to ckyh and records no login
 time. UUIDs and pseudonyms are service-authenticated community-local bindings.
 
 ## No return and lobby
@@ -56,7 +56,7 @@ error, cancellation and process exit. Storage/clock failures cannot leave a
 member or community locked. Leaf CAS revisions and unique indexes fence competing
 writes across processes. A mutation may still have an uncertain remote result:
 read current leaf state and retry with fresh authorization. Partial registration
-receipts can be reconciled from committed cpky records by explicit synchronization.
+receipts can be reconciled from committed ckyh records by explicit synchronization.
 
 There is no synthetic positive recovery decision. A register row alone cannot
 readmit a lapsed member. After a process loss or failed admission, a retry must
@@ -138,7 +138,7 @@ the original revision/digest remain unchanged. Successful spend/replay tests
 remain blocked on the real cblc extension circuit, not replaced by a fake verifier.
 
 `begin_login` requires the credential ID saved by the wallet at registration.
-It uses cpky's uniform credential-first challenge for known, unknown and revoked
+It uses ckyh's uniform credential-first challenge for known, unknown and revoked
 keys. A bare UUID cannot reveal whether a person registered. The browser response
 is still verified by WebAuthn and the exact credential is rechecked on every
 subsequent authenticated call. Starting a login takes no write lock.
@@ -159,7 +159,7 @@ A passkey ecosystem is a device. A member with a valid UV-authenticated session
 can register another UV-required passkey for the same membership through
 `begin_additional_registration` / `finish_additional_registration`. The service
 binds the single-use server state to the initiating session and checks its expiry.
-cmbr rechecks the exact key, member and live lifecycle at both boundaries; cpky
+cmbr rechecks the exact key, member and live lifecycle at both boundaries; ckyh
 atomically refuses insertion if the authorizing key was revoked. Addition preserves
 the pseudonym, handle, lease, pins and probation. No manual approval is involved.
 
@@ -170,9 +170,9 @@ permanently: no recovery, and NO RETURN under a fresh registration identifier.
 ## Discoverable sign-in and Keyhole
 
 `begin_discoverable_login()` needs no member UUID or credential ID. It returns
-cpky's options unchanged: a fresh challenge, empty allow-list and required UV.
+ckyh's options unchanged: a fresh challenge, empty allow-list and required UV.
 `finish_login` consumes either kind of pending login, delegates verification and
-atomic counter/revocation checks to cpky, and returns the existing membership to
+atomic counter/revocation checks to ckyh, and returns the existing membership to
 the lobby. It rechecks current lifecycle and exact credential just as for
 credential-first login; it never creates a member, extends a lease, resets
 probation or records a login date. The user handle is not authority by itself.
@@ -181,7 +181,7 @@ The service bounds, throttles, expires and binds pending ceremonies to clients.
 Creation now requests resident credentials. All server options pass unchanged
 through the service to device-side Keyhole; only Keyhole adds its local PRF input.
 It must strip the entire PRF extension before sending a response. Deserialize
-responses directly into cpky's guarded wire types: parsing into upstream types
+responses directly into ckyh's guarded wire types: parsing into upstream types
 first would discard the extension before it can be refused. Both registration
 (including additional keys) and both login paths use those same guarded types.
-PRF and vault restoration stay on the device; see cpky's Keyhole contract.
+PRF and vault restoration stay on the device; see ckyh's Keyhole contract.

@@ -16,7 +16,7 @@ cgts = { git = "https://github.com/corbet-libs/cgts", branch = "main" }
 cgrd = { git = "https://github.com/corbet-foss/cgrd", branch = "main", default-features = false }
 crlt = { git = "https://github.com/corbet-foss/crlt", branch = "main" }
 crgs = { git = "https://github.com/corbet-foss/crgs", branch = "main" }
-cpky = { git = "https://github.com/corbet-foss/cpky", branch = "main" }
+ckyh = { git = "https://github.com/corbet-foss/ckyh", branch = "main" }
 cnrl = { git = "https://github.com/corbet-foss/cnrl", branch = "main" }
 cpns = { git = "https://github.com/corbet-foss/cpns", branch = "main" }
 clbs = { git = "https://github.com/corbet-foss/clbs", branch = "main" }

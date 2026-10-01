@@ -16,7 +16,7 @@ pub use membership::{
 pub use storage::{LibsqlStorage, MemoryStorage, Revocation, SCHEMA, Storage};
 // Export protocol values only; callers cannot reach leaf writers through cmbr.
 pub use cnrl::{Record, State};
-pub use cpky::{Authentication, Uuid};
+pub use ckyh::{Authentication, Uuid};
 pub use cpns::server::Pin;
 pub use crgs::{Handle, Member, YearMonth};
 
@@ -24,7 +24,7 @@ pub use crgs::{Handle, Member, YearMonth};
 /// The root assigns contiguous versions; leaves never migrate independently.
 pub const SCHEMAS: [(&str, &str); 6] = [
     ("cmbr", SCHEMA),
-    ("cpky", cpky::LIBSQL_SCHEMA),
+    ("ckyh", ckyh::LIBSQL_SCHEMA),
     ("crgs", crgs::SCHEMA),
     ("cnrl", cnrl::SCHEMA),
     ("cpns", cpns::server::libsql::SCHEMA),
@@ -94,10 +94,10 @@ impl From<crgs::Error> for Error {
         }
     }
 }
-impl From<cpky::Error> for Error {
-    fn from(e: cpky::Error) -> Self {
+impl From<ckyh::Error> for Error {
+    fn from(e: ckyh::Error) -> Self {
         match e {
-            cpky::Error::Storage => Self::Unavailable,
+            ckyh::Error::Storage => Self::Unavailable,
             _ => Self::Passkey,
         }
     }

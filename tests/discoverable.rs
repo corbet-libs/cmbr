@@ -19,7 +19,7 @@ async fn restore_returns_the_existing_membership_and_rechecks_revocation_and_exp
         "required"
     );
     let mut response = device.ceremony(options, true, ORIGIN).await;
-    assert!(serde_json::from_value::<cpky::RegisterPublicKeyCredential>(response.clone()).is_err());
+    assert!(serde_json::from_value::<ckyh::RegisterPublicKeyCredential>(response.clone()).is_err());
     let prf = strip_prf(&mut response);
     assert_eq!(prf["enabled"], true);
     let before = members

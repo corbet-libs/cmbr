@@ -7,7 +7,7 @@ use std::sync::{
 
 pub mod resident;
 
-use cpky::Uuid;
+use ckyh::Uuid;
 use ed25519_dalek::{Signer, SigningKey};
 use webauthn_authenticator_rs::{AuthenticatorBackend, softtoken::SoftToken};
 
@@ -98,7 +98,7 @@ pub fn config() -> cmbr::Config {
         membership_action: "membership".into(),
         release_period: crgs::ReleasePeriod::default(),
         rp_id: "members.example.org".into(),
-        origins: vec![cpky::Url::parse(ORIGIN).unwrap()],
+        origins: vec![ckyh::Url::parse(ORIGIN).unwrap()],
     }
 }
 pub fn facade(db: &crlt::Db, community: &str, clock: Clock) -> Facade {
@@ -143,7 +143,7 @@ pub async fn register(facade: &Facade, user: Uuid, subject: &str) -> SoftToken {
         .require_resident_key = false;
     let response = device
         .perform_register(
-            cpky::Url::parse(ORIGIN).unwrap(),
+            ckyh::Url::parse(ORIGIN).unwrap(),
             challenge.public_key,
             300_000,
         )
@@ -173,7 +173,7 @@ pub async fn login(facade: &Facade, device: &mut SoftToken, user: Uuid) -> cmbr:
     let (challenge, pending) = facade.begin_login(user, id.clone().into()).await.unwrap();
     let response = device
         .perform_auth(
-            cpky::Url::parse(ORIGIN).unwrap(),
+            ckyh::Url::parse(ORIGIN).unwrap(),
             challenge.public_key,
             300_000,
         )
@@ -368,20 +368,20 @@ pub async fn checked(
 pub trait TestApi {
     async fn admit_test(
         &self,
-        auth: &cpky::Authentication,
+        auth: &ckyh::Authentication,
         raw: &crbk::Snapshot,
         gates: &[crbk::GateResult],
         lease: crgs::YearMonth,
     ) -> cmbr::Result<cnrl::Record>;
     async fn lobby_test(
         &self,
-        auth: &cpky::Authentication,
+        auth: &ckyh::Authentication,
         raw: &crbk::Snapshot,
         gates: &[crbk::GateResult],
     ) -> cmbr::Result<(cnrl::Record, crbk::Decision)>;
     async fn lapse_test(
         &self,
-        auth: &cpky::Authentication,
+        auth: &ckyh::Authentication,
         raw: &crbk::Snapshot,
         gates: &[crbk::GateResult],
     ) -> cmbr::Result<cnrl::Record>;
@@ -389,7 +389,7 @@ pub trait TestApi {
 impl TestApi for Facade {
     async fn admit_test(
         &self,
-        auth: &cpky::Authentication,
+        auth: &ckyh::Authentication,
         raw: &crbk::Snapshot,
         gates: &[crbk::GateResult],
         lease: crgs::YearMonth,
@@ -402,7 +402,7 @@ impl TestApi for Facade {
     }
     async fn lobby_test(
         &self,
-        auth: &cpky::Authentication,
+        auth: &ckyh::Authentication,
         raw: &crbk::Snapshot,
         gates: &[crbk::GateResult],
     ) -> cmbr::Result<(cnrl::Record, crbk::Decision)> {
@@ -415,7 +415,7 @@ impl TestApi for Facade {
     }
     async fn lapse_test(
         &self,
-        auth: &cpky::Authentication,
+        auth: &ckyh::Authentication,
         raw: &crbk::Snapshot,
         gates: &[crbk::GateResult],
     ) -> cmbr::Result<cnrl::Record> {

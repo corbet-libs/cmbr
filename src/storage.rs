@@ -333,8 +333,8 @@ impl Storage for LibsqlStorage {
 // A process-local per-member queue; no guard survives cancellation/error/process
 // exit and no database Busy marker exists. Service writers share this registry.
 // Leaf row revisions and unique constraints still fence stale/competing writes.
-type MemberLocks = BTreeMap<(String, cpky::Uuid), Weak<Mutex<()>>>;
-pub(crate) async fn member_lock(community: &str, user: cpky::Uuid) -> OwnedMutexGuard<()> {
+type MemberLocks = BTreeMap<(String, ckyh::Uuid), Weak<Mutex<()>>>;
+pub(crate) async fn member_lock(community: &str, user: ckyh::Uuid) -> OwnedMutexGuard<()> {
     static LOCKS: OnceLock<StdMutex<MemberLocks>> = OnceLock::new();
     let lock = {
         let mut locks = LOCKS

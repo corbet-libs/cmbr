@@ -60,7 +60,7 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
     let mut token = SoftToken::new(true).unwrap().0;
     let response = token
         .perform_register(
-            cpky::Url::parse(ORIGIN).unwrap(),
+            ckyh::Url::parse(ORIGIN).unwrap(),
             {
                 let mut request = challenge.public_key;
                 request
@@ -78,7 +78,7 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
         keys.finish_registration(
             pending.pending,
             &response.into(),
-            cpky::CreationMonth::new(2026, 9).unwrap(),
+            ckyh::CreationMonth::new(2026, 9).unwrap(),
         )
     })
     .await
@@ -211,7 +211,7 @@ async fn revoked_authentication_cannot_change_pins_or_revoke_the_remaining_key()
     let mut token = SoftToken::new(true).unwrap().0;
     let response = token
         .perform_register(
-            cpky::Url::parse(ORIGIN).unwrap(),
+            ckyh::Url::parse(ORIGIN).unwrap(),
             {
                 let mut request = challenge.public_key;
                 request
@@ -229,7 +229,7 @@ async fn revoked_authentication_cannot_change_pins_or_revoke_the_remaining_key()
         keys.finish_registration(
             pending,
             &response.into(),
-            cpky::CreationMonth::new(2026, 9).unwrap(),
+            ckyh::CreationMonth::new(2026, 9).unwrap(),
         )
     })
     .await
@@ -439,7 +439,7 @@ async fn login_challenges_hide_membership_and_never_create_enrolment() {
     let (known, _) = m.begin_login(USER, id.clone()).await.unwrap();
     let unknown = Uuid::from_u128(987);
     let (absent, _) = m.begin_login(unknown, id).await.unwrap();
-    let shape = |value: cpky::RequestChallengeResponse| {
+    let shape = |value: ckyh::RequestChallengeResponse| {
         let mut value = serde_json::to_value(value).unwrap();
         value["publicKey"]
             .as_object_mut()

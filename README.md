@@ -6,7 +6,7 @@ leaves. Native server library, FSL-1.1-ALv2; interfaces are experimental.
 `Membership` exposes first passkey registration, account-first login, authenticated
 resume/lobby, handle reservation/lookup, register lookup, admission/renewal, lapse, pins and authorized
 pin changes, passkey revocation, lost-key release, self-ban, and bounded maintenance.
-It delegates execution to `cpky`, `crgs`, `cnrl`, `cpns`, `clbs`, `crbk` and `cgrd`.
+It delegates execution to `ckyh`, `crgs`, `cnrl`, `cpns`, `clbs`, `crbk` and `cgrd`.
 See [the implemented contract](docs/CONTRACT.md) before embedding it.
 
 ## Integration
@@ -15,7 +15,7 @@ The service opens one `crlt::Db` per community, includes `SCHEMAS` in its comple
 numbered migration history, and constructs `Membership::new` inside its existing
 multithreaded Tokio runtime. All leaf stores use that database and the coordinator's
 fixed community. `LibsqlStorage` is the persistent coordinator; `MemoryStorage`
-is a real CAS implementation for tests. cpky's synchronous operations run on
+is a real CAS implementation for tests. ckyh's synchronous operations run on
 Tokio blocking workers; no request creates a runtime or connection pool.
 
 The caller verifies the global presentation and binds a community-local UUID to
@@ -54,7 +54,7 @@ were read before integration. Exact revisions are in `Cargo.toml`.
 
 | Candidate | Choice and reason |
 |---|---|
-| [cpky](https://github.com/corbet-foss/cpky), [webauthn-rs 0.5.5](https://crates.io/crates/webauthn-rs/0.5.5) | Use cpky's established UV-required verification, counters and libSQL adapter. No second WebAuthn implementation. cnrl's cpky pin was advanced upstream to share these exact types. |
+| [ckyh](https://github.com/corbet-foss/ckyh), [webauthn-rs 0.5.5](https://crates.io/crates/webauthn-rs/0.5.5) | Use ckyh's established UV-required verification, counters and libSQL adapter. No second WebAuthn implementation. cnrl's ckyh pin was advanced upstream to share these exact types. |
 | [crgs](https://github.com/corbet-foss/crgs), [cnrl](https://github.com/corbet-foss/cnrl) | Use register/lease rules and the existing resumable state machine. This facade owns only orchestration and identity binding. |
 | [statig 0.4.1](https://crates.io/crates/statig), [smlang](https://github.com/korken89/smlang-rs) | Maintained state-machine candidates; not added because cnrl already executes the required lifecycle. |
 | [cpns](https://github.com/corbet-foss/cpns) | Reuse fingerprint types, insert-only pins and spent-token CAS. No hashing or token protocol in cmbr. |
@@ -85,7 +85,7 @@ Never publish this crate to a registry.
 
 Open: proven cblc extension circuit and intent-bound self-ban verifier adapters; approved
 additional-device registration and session invalidation; discoverable login in
-cpky; full private balance extension proofs before activating change-token gates.
+ckyh; full private balance extension proofs before activating change-token gates.
 No raw gate data, login dates, device names or request logs are stored. Dependency
 SQL/HTTP tracing and proxy body logging must stay disabled in the service.
 

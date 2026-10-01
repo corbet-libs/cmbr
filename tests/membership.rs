@@ -134,7 +134,7 @@ async fn identity_community_handle_and_registration_conflicts_fail_closed() {
             .is_err()
     );
     assert!(
-        a.begin_registration(cpky::Uuid::from_u128(2), SUBJECT)
+        a.begin_registration(ckyh::Uuid::from_u128(2), SUBJECT)
             .await
             .is_err()
     );
@@ -151,8 +151,8 @@ async fn identity_community_handle_and_registration_conflicts_fail_closed() {
     a.reserve_handle(&auth.authentication, HANDLE, &[])
         .await
         .unwrap();
-    let mut second = register(&a, cpky::Uuid::from_u128(3), "second-pseudonym").await;
-    let other = login(&a, &mut second, cpky::Uuid::from_u128(3)).await;
+    let mut second = register(&a, ckyh::Uuid::from_u128(3), "second-pseudonym").await;
+    let other = login(&a, &mut second, ckyh::Uuid::from_u128(3)).await;
     assert_eq!(
         a.reserve_handle(&other.authentication, HANDLE, &[]).await,
         Err(Error::Register)
@@ -192,8 +192,8 @@ async fn expiry_maintenance_frees_pending_handle_and_never_revives_identity() {
         Err(Error::Transition)
     );
     assert!(facade.begin_registration(USER, SUBJECT).await.is_err());
-    let mut next = register(&facade, cpky::Uuid::from_u128(2), "another-subject").await;
-    let next = login(&facade, &mut next, cpky::Uuid::from_u128(2)).await;
+    let mut next = register(&facade, ckyh::Uuid::from_u128(2), "another-subject").await;
+    let next = login(&facade, &mut next, ckyh::Uuid::from_u128(2)).await;
     facade
         .reserve_handle(&next.authentication, HANDLE, &[])
         .await
@@ -231,7 +231,7 @@ async fn confirmed_self_ban_survives_reopen_and_cannot_be_bypassed() {
     );
     assert_eq!(a.resume(&auth.authentication).await, Err(Error::Restricted));
     assert!(
-        a.begin_registration(cpky::Uuid::from_u128(50), SUBJECT)
+        a.begin_registration(ckyh::Uuid::from_u128(50), SUBJECT)
             .await
             .is_err()
     );
@@ -263,7 +263,7 @@ async fn unverified_registration_and_wrong_instance_do_not_write_passkeys() {
     let mut device = SoftToken::new(true).unwrap().0;
     let response = device
         .perform_register(
-            cpky::Url::parse(ORIGIN).unwrap(),
+            ckyh::Url::parse(ORIGIN).unwrap(),
             {
                 // SoftToken is a legacy non-resident fixture.
                 let mut options = challenge.public_key;
@@ -300,7 +300,7 @@ async fn unverified_registration_and_wrong_instance_do_not_write_passkeys() {
             serde_json::from_value(serde_json::json!("discouraged")).unwrap();
     }
     let response = device
-        .perform_register(cpky::Url::parse(ORIGIN).unwrap(), options, 300_000)
+        .perform_register(ckyh::Url::parse(ORIGIN).unwrap(), options, 300_000)
         .unwrap();
     assert_eq!(
         a.finish_registration(pending, response.into()).await,
@@ -327,7 +327,7 @@ async fn handle_availability_and_exact_session_revocation_use_real_leaves() {
     let (_, auth) = pending(&a, "a").await;
     assert!(!a.is_handle_available(HANDLE, &[]).await.unwrap());
     assert!(b.is_handle_available(HANDLE, &[]).await.unwrap());
-    let unknown: cpky::CredentialID = vec![0; 32].into();
+    let unknown: ckyh::CredentialID = vec![0; 32].into();
     assert!(
         !a.session_is_active(&auth.authentication, &unknown)
             .await
@@ -361,7 +361,7 @@ async fn additional_device_preserves_membership_and_survives_original_removal() 
     let mut second = SoftToken::new(true).unwrap().0;
     let response = second
         .perform_register(
-            cpky::Url::parse(ORIGIN).unwrap(),
+            ckyh::Url::parse(ORIGIN).unwrap(),
             {
                 // SoftToken is a legacy non-resident fixture.
                 let mut options = options.public_key;
@@ -420,7 +420,7 @@ async fn additional_device_preserves_membership_and_survives_original_removal() 
         State::Released
     );
     assert!(
-        m.begin_registration(cpky::Uuid::from_u128(9), SUBJECT)
+        m.begin_registration(ckyh::Uuid::from_u128(9), SUBJECT)
             .await
             .is_err()
     );
@@ -432,8 +432,8 @@ async fn additional_registration_rejects_substitution_revocation_and_expiry() {
     let clock = Clock::new();
     let m = facade(&db, "a", clock.clone());
     let (_, first) = pending(&m, "a").await;
-    let mut other_device = register(&m, cpky::Uuid::from_u128(2), "another-member").await;
-    let other = login(&m, &mut other_device, cpky::Uuid::from_u128(2)).await;
+    let mut other_device = register(&m, ckyh::Uuid::from_u128(2), "another-member").await;
+    let other = login(&m, &mut other_device, ckyh::Uuid::from_u128(2)).await;
     let (options, state) = m
         .begin_additional_registration(&first.authentication)
         .await
@@ -442,7 +442,7 @@ async fn additional_registration_rejects_substitution_revocation_and_expiry() {
         .unwrap()
         .0
         .perform_register(
-            cpky::Url::parse(ORIGIN).unwrap(),
+            ckyh::Url::parse(ORIGIN).unwrap(),
             {
                 // SoftToken is a legacy non-resident fixture.
                 let mut options = options.public_key;
@@ -476,7 +476,7 @@ async fn additional_registration_rejects_substitution_revocation_and_expiry() {
         .unwrap()
         .0
         .perform_register(
-            cpky::Url::parse(ORIGIN).unwrap(),
+            ckyh::Url::parse(ORIGIN).unwrap(),
             {
                 // SoftToken is a legacy non-resident fixture.
                 let mut options = options.public_key;
@@ -509,7 +509,7 @@ async fn additional_registration_rejects_substitution_revocation_and_expiry() {
         .unwrap()
         .0
         .perform_register(
-            cpky::Url::parse(ORIGIN).unwrap(),
+            ckyh::Url::parse(ORIGIN).unwrap(),
             {
                 // SoftToken is a legacy non-resident fixture.
                 let mut options = options.public_key;

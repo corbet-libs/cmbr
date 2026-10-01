@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use cgts::pins::PinSpendVerifier;
 use chrono::{DateTime, Datelike, Utc};
-use cpky::{Authentication, Uuid};
+use ckyh::{Authentication, Uuid};
 use cpns::server::{Pin, Pins};
 
 use crate::{Error, Result, Storage};
@@ -20,21 +20,21 @@ pub struct Config {
     pub lease_months: u32,
     /// Community-specific WebAuthn relying party ID.
     pub rp_id: String,
-    /// Explicit allowed HTTPS origins, validated by cpky.
-    pub origins: Vec<cpky::Url>,
+    /// Explicit allowed HTTPS origins, validated by ckyh.
+    pub origins: Vec<ckyh::Url>,
 }
 
-/// Server-only single-use registration state, bound to its cpky instance.
+/// Server-only single-use registration state, bound to its ckyh instance.
 pub struct PendingRegistration {
     user: Uuid,
-    pending: cpky::PendingRegistration,
+    pending: ckyh::PendingRegistration,
 }
 /// Single-use additional registration bound to its authenticating passkey.
 /// The caller keeps it in the initiating live session; it cannot be serialized.
 pub struct PendingAdditionalRegistration {
     user: Uuid,
-    authorizer: cpky::CredentialID,
-    pending: cpky::PendingRegistration,
+    authorizer: ckyh::CredentialID,
+    pending: ckyh::PendingRegistration,
 }
 /// Server-only single-use login state.
 pub struct PendingLogin {
@@ -42,8 +42,8 @@ pub struct PendingLogin {
 }
 
 enum LoginCeremony {
-    Credential(cpky::PendingAuthentication),
-    Discoverable(cpky::PendingDiscoverableAuthentication),
+    Credential(ckyh::PendingAuthentication),
+    Discoverable(ckyh::PendingDiscoverableAuthentication),
 }
 
 /// A successful passkey login always returns to the enrolment lobby.
@@ -88,7 +88,7 @@ impl<C: clbs::Clock> clbs::Clock for SharedClock<C> {
 /// Pin changes use cgts's sealed spend adapter; supply a real self-ban verifier.
 pub struct Membership<S, L, C = clbs::SystemClock> {
     storage: Arc<S>,
-    passkeys: Arc<cpky::Passkeys<cpky::LibsqlStore>>,
+    passkeys: Arc<ckyh::Passkeys<ckyh::LibsqlStore>>,
     enrol: Arc<cnrl::Enrol<cnrl::LibsqlStorage>>,
     enrol_store: cnrl::LibsqlStorage,
     register: Arc<crgs::Register<crgs::LibsqlStorage>>,
@@ -142,8 +142,8 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
         }
         let community = storage.community();
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| Error::InvalidInput)?;
-        let passkeys = cpky::Passkeys::new(
-            cpky::LibsqlStore::new(db, community, runtime)?,
+        let passkeys = ckyh::Passkeys::new(
+            ckyh::LibsqlStore::new(db, community, runtime)?,
             community,
             &config.rp_id,
             &config.origins,
@@ -188,7 +188,7 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
         &self,
         user: Uuid,
         pseudonym: &str,
-    ) -> Result<(cpky::CreationChallengeResponse, PendingRegistration)> {
+    ) -> Result<(ckyh::CreationChallengeResponse, PendingRegistration)> {
         crate::text(pseudonym)?;
         if user.is_nil() {
             return Err(Error::InvalidInput);
@@ -206,12 +206,12 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
         .await
     }
 
-    /// Verify and persist the passkey, then apply the actual cpky receipt to cnrl.
-    /// A lost response is reconciled by state/resume from cpky's committed row.
+    /// Verify and persist the passkey, then apply the actual ckyh receipt to cnrl.
+    /// A lost response is reconciled by state/resume from ckyh's committed row.
     pub async fn finish_registration(
         &self,
         state: PendingRegistration,
-        response: cpky::RegisterPublicKeyCredential,
+        response: ckyh::RegisterPublicKeyCredential,
     ) -> Result<Record> {
         let _guard = crate::storage::member_lock(self.storage.community(), state.user).await;
         async {
@@ -221,7 +221,7 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
                 return Err(Error::Transition);
             }
             let date = date(now)?;
-            let month = cpky::CreationMonth::new(date.year() as u16, date.month() as u8)?;
+            let month = ckyh::CreationMonth::new(date.year() as u16, date.month() as u8)?;
             let keys = self.passkeys.clone();
             let receipt =
                 blocking(move || keys.finish_registration(state.pending, &response, month)).await?;
@@ -243,7 +243,7 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
         &self,
         auth: &Authentication,
     ) -> Result<(
-        cpky::CreationChallengeResponse,
+        ckyh::CreationChallengeResponse,
         PendingAdditionalRegistration,
     )> {
         let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
@@ -263,21 +263,21 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
     }
 
     /// Complete an addition from the same live session and exact authorizing key.
-    /// cpky requires UV and rechecks the authorizer atomically with insertion.
+    /// ckyh requires UV and rechecks the authorizer atomically with insertion.
     /// Adding a key preserves lifecycle, handle, lease, pins and probation.
     pub async fn finish_additional_registration(
         &self,
         auth: &Authentication,
         state: PendingAdditionalRegistration,
-        response: cpky::RegisterPublicKeyCredential,
-    ) -> Result<cpky::StoredPasskey> {
+        response: ckyh::RegisterPublicKeyCredential,
+    ) -> Result<ckyh::StoredPasskey> {
         let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
         if state.user != auth.member() || state.authorizer != *auth.credential_id() {
             return Err(Error::Identity);
         }
         self.authenticated(auth, self.now()?).await?;
         let date = date(self.now()?)?;
-        let month = cpky::CreationMonth::new(date.year() as u16, date.month() as u8)?;
+        let month = ckyh::CreationMonth::new(date.year() as u16, date.month() as u8)?;
         let keys = self.passkeys.clone();
         blocking(move || keys.finish_registration(state.pending, &response, month)).await
     }
@@ -287,8 +287,8 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
     pub async fn begin_login(
         &self,
         user: Uuid,
-        credential_id: cpky::CredentialID,
-    ) -> Result<(cpky::RequestChallengeResponse, PendingLogin)> {
+        credential_id: ckyh::CredentialID,
+    ) -> Result<(ckyh::RequestChallengeResponse, PendingLogin)> {
         async {
             self.now()?;
             let keys = self.passkeys.clone();
@@ -305,10 +305,10 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
     }
 
     /// Begin usernameless sign-in when a new device has no stored identifiers.
-    /// Returns cpky's server-built options unchanged; no membership lookup occurs.
+    /// Returns ckyh's server-built options unchanged; no membership lookup occurs.
     pub async fn begin_discoverable_login(
         &self,
-    ) -> Result<(cpky::RequestChallengeResponse, PendingLogin)> {
+    ) -> Result<(ckyh::RequestChallengeResponse, PendingLogin)> {
         self.now()?;
         let keys = self.passkeys.clone();
         let (challenge, pending) =
@@ -321,12 +321,12 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
         ))
     }
 
-    /// Commit cpky's counter checks and return authenticated enrolment to the lobby.
+    /// Commit ckyh's counter checks and return authenticated enrolment to the lobby.
     /// This does not extend a lease or record a login date.
     pub async fn finish_login(
         &self,
         state: PendingLogin,
-        response: cpky::PublicKeyCredential,
+        response: ckyh::PublicKeyCredential,
     ) -> Result<Login> {
         async {
             let keys = self.passkeys.clone();
@@ -355,7 +355,7 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
         self.sync(user, self.now()?).await
     }
 
-    /// Resume the stable pseudonym binding after a committed cpky authentication.
+    /// Resume the stable pseudonym binding after a committed ckyh authentication.
     pub async fn resume(&self, auth: &Authentication) -> Result<Record> {
         self.authenticated(auth, self.now()?).await
     }
@@ -374,11 +374,11 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
     }
 
     /// Revalidate a session's exact credential, including immediate revocation.
-    /// An opaque cpky authentication alone is not a renewable bearer capability.
+    /// An opaque ckyh authentication alone is not a renewable bearer capability.
     pub async fn session_is_active(
         &self,
         auth: &Authentication,
-        credential: &cpky::CredentialID,
+        credential: &ckyh::CredentialID,
     ) -> Result<bool> {
         async {
             self.authenticated(auth, self.now()?).await?;
@@ -706,7 +706,7 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
     pub async fn revoke_passkey(
         &self,
         auth: &Authentication,
-        credential: cpky::CredentialID,
+        credential: ckyh::CredentialID,
     ) -> Result<Record> {
         let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
         async {
@@ -819,7 +819,7 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
             Ok(())
         }
     }
-    async fn credentials(&self, user: Uuid) -> Result<Vec<cpky::StoredPasskey>> {
+    async fn credentials(&self, user: Uuid) -> Result<Vec<ckyh::StoredPasskey>> {
         let keys = self.passkeys.clone();
         blocking(move || keys.list(user)).await
     }
@@ -1007,7 +1007,7 @@ fn date(now: i64) -> Result<DateTime<Utc>> {
     Ok(date)
 }
 async fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> std::result::Result<T, cpky::Error> + Send + 'static,
+    work: impl FnOnce() -> std::result::Result<T, ckyh::Error> + Send + 'static,
 ) -> Result<T> {
     tokio::task::spawn_blocking(work)
         .await

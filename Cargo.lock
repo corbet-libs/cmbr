@@ -805,7 +805,7 @@ dependencies = [
 [[package]]
 name = "cgts"
 version = "0.0.0"
-source = "git+https://github.com/corbet-libs/cgts?branch=main#523c96986defb8fe05952e79e81f58829bcb73be"
+source = "git+https://github.com/corbet-libs/cgts?branch=main#22c93bfa5e70e3cdce6c064c5ab2666b9f665de5"
 dependencies = [
  "cblc",
  "cgrd",
@@ -938,7 +938,7 @@ dependencies = [
 [[package]]
 name = "clbs"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/clbs?branch=main#0a8377e0afbbb3c6050a6b30832b0e55f8d221b7"
+source = "git+https://github.com/corbet-foss/clbs?branch=main#23bf4db58f06c902a76619974ff7eac7329916f0"
 dependencies = [
  "crlt",
  "serde",
@@ -1420,7 +1420,7 @@ dependencies = [
 [[package]]
 name = "cthl"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cthl?branch=main#ce5eabb53b14a1c2936bfbcc3ba2a182e16a3502"
+source = "git+https://github.com/corbet-foss/cthl?branch=main#4b4d5ff5308619e79341b308e8ee306f53a75edb"
 dependencies = [
  "governor",
 ]

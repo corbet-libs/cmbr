@@ -2,7 +2,7 @@
 
 cmbr composes community enrolment (cnrl), passkeys (cpky), handles and leases
 (crgs), pins (cpns), and legal restrictions (clbs). cplc alone decides admission;
-cmnt wires the facades. Leaves own their cryptography, lifecycle transitions and
+cmty wires the facades. Leaves own their cryptography, lifecycle transitions and
 atomic writes. Services select trusted storage/verifiers and authenticate routes.
 No raw gate evidence, secrets, login times, request logs or history are retained.
 
@@ -82,7 +82,7 @@ credential. Signing is refused while an unforwarded revocation is pending.
 ## Revocations
 
 Security changes write a durable revocation request before changing the leaf.
-cmnt drains `revocations`, advances cplc's epoch, publishes fresh trust/revocation
+cmty drains `revocations`, advances cplc's epoch, publishes fresh trust/revocation
 state, then acknowledges the exact generation. Advancing the epoch invalidates
 all old community credentials, including any removed device key. A newer event
 cannot be erased by an older acknowledgement, including after a prior drain.
@@ -151,7 +151,7 @@ expiry, leases and signed community credentials retain their coarse time rules.
 
 An explicit admitted-to-lapsed transition queues its generation-tagged revocation
 before committing the lifecycle change. Repeated lapse does not create a second
-event. The cmnt relay publishes the epoch before acknowledging that event.
+event. The cmty relay publishes the epoch before acknowledging that event.
 
 ## Additional passkeys
 

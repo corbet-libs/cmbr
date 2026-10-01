@@ -1,6 +1,6 @@
 # cmbr
 
-Community membership facade under `cvld → cmnt`, composing the finished Rust
+Community membership facade under `cvld → cmty`, composing the finished Rust
 leaves. Native server library, FSL-1.1-ALv2; interfaces are experimental.
 
 `Membership` exposes first passkey registration, account-first login, authenticated

@@ -117,7 +117,7 @@ impl<S, L, C> Clone for Membership<S, L, C> {
 impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static>
     Membership<S, L, C>
 {
-    /// Durable revocation events for cmnt to forward to cplc before issuance.
+    /// Durable revocation events for cmty to forward to cplc before issuance.
     pub async fn revocations(&self, limit: usize) -> Result<Vec<crate::Revocation>> {
         self.storage.revocations(limit).await
     }

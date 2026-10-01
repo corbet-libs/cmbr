@@ -99,13 +99,19 @@ pub trait Storage: Send + Sync {
 }
 fn device_input(member: &str, credential: &[u8], keys: &[[u8; 32]]) -> Result<()> {
     crate::text(member)?;
-    if credential.is_empty() || credential.len() > 1024 || keys.len() > 64
-        || keys.iter().collect::<BTreeSet<_>>().len() != keys.len() {
+    if credential.is_empty()
+        || credential.len() > 1024
+        || keys.len() > 64
+        || keys.iter().collect::<BTreeSet<_>>().len() != keys.len()
+    {
         return Err(Error::InvalidInput);
     }
     for key in keys {
-        let public = ed25519_dalek::VerifyingKey::from_bytes(key).map_err(|_| Error::InvalidInput)?;
-        if public.is_weak() { return Err(Error::InvalidInput); }
+        let public =
+            ed25519_dalek::VerifyingKey::from_bytes(key).map_err(|_| Error::InvalidInput)?;
+        if public.is_weak() {
+            return Err(Error::InvalidInput);
+        }
     }
     Ok(())
 }
@@ -150,20 +156,37 @@ impl Storage for MemoryStorage {
     fn community(&self) -> &str {
         &self.community
     }
-    async fn set_device_keys(&self, member: &str, credential: &[u8], keys: &[[u8; 32]]) -> Result<()> {
+    async fn set_device_keys(
+        &self,
+        member: &str,
+        credential: &[u8],
+        keys: &[[u8; 32]],
+    ) -> Result<()> {
         device_input(member, credential, keys)?;
         let mut state = self.state.lock().await;
-        state.devices.insert((member.into(), credential.into()), keys.iter().copied().collect());
+        state.devices.insert(
+            (member.into(), credential.into()),
+            keys.iter().copied().collect(),
+        );
         Ok(())
     }
     async fn device_keys(&self, member: &str) -> Result<Vec<DeviceKeyBinding>> {
         crate::text(member)?;
         let state = self.state.lock().await;
-        let result: Vec<_> = state.devices.iter().filter(|((subject, _), _)| subject == member)
-            .flat_map(|((_, credential), keys)| keys.iter().map(|key| DeviceKeyBinding {
-                credential: credential.clone(), key: *key,
-            })).collect();
-        if result.len() > 1024 { return Err(Error::Unavailable); }
+        let result: Vec<_> = state
+            .devices
+            .iter()
+            .filter(|((subject, _), _)| subject == member)
+            .flat_map(|((_, credential), keys)| {
+                keys.iter().map(|key| DeviceKeyBinding {
+                    credential: credential.clone(),
+                    key: *key,
+                })
+            })
+            .collect();
+        if result.len() > 1024 {
+            return Err(Error::Unavailable);
+        }
         Ok(result)
     }
     async fn probation(&self, member: &str) -> Result<Option<Option<u64>>> {
@@ -284,10 +307,19 @@ impl Storage for LibsqlStorage {
     fn community(&self) -> &str {
         &self.community
     }
-    async fn set_device_keys(&self, member: &str, credential: &[u8], keys: &[[u8; 32]]) -> Result<()> {
+    async fn set_device_keys(
+        &self,
+        member: &str,
+        credential: &[u8],
+        keys: &[[u8; 32]],
+    ) -> Result<()> {
         device_input(member, credential, keys)?;
         let mut tx = self.scope.tx().await?;
-        tx.execute("DELETE FROM cmbr_device_keys WHERE subject = ?1 AND credential = ?2", params![member, credential]).await?;
+        tx.execute(
+            "DELETE FROM cmbr_device_keys WHERE subject = ?1 AND credential = ?2",
+            params![member, credential],
+        )
+        .await?;
         for key in keys {
             tx.execute("INSERT INTO cmbr_device_keys (subject, credential, signing_key) VALUES (?1, ?2, ?3)", params![member, credential, key.as_slice()]).await?;
         }
@@ -297,14 +329,25 @@ impl Storage for LibsqlStorage {
     async fn device_keys(&self, member: &str) -> Result<Vec<DeviceKeyBinding>> {
         crate::text(member)?;
         let rows = self.scope.query("SELECT credential, signing_key FROM cmbr_device_keys WHERE subject = ?1 ORDER BY credential, signing_key LIMIT 1025", [member]).await?;
-        if rows.len() > 1024 { return Err(Error::Unavailable); }
-        rows.iter().map(|row| {
-            let crlt::Value::Blob(credential) = row.get_value(0)? else { return Err(Error::Unavailable); };
-            let crlt::Value::Blob(key) = row.get_value(1)? else { return Err(Error::Unavailable); };
-            let key: [u8; 32] = key.as_slice().try_into().map_err(|_| Error::Unavailable)?;
-            device_input(member, credential, &[key]).map_err(|_| Error::Unavailable)?;
-            Ok(DeviceKeyBinding { credential: credential.clone(), key })
-        }).collect()
+        if rows.len() > 1024 {
+            return Err(Error::Unavailable);
+        }
+        rows.iter()
+            .map(|row| {
+                let crlt::Value::Blob(credential) = row.get_value(0)? else {
+                    return Err(Error::Unavailable);
+                };
+                let crlt::Value::Blob(key) = row.get_value(1)? else {
+                    return Err(Error::Unavailable);
+                };
+                let key: [u8; 32] = key.as_slice().try_into().map_err(|_| Error::Unavailable)?;
+                device_input(member, credential, &[key]).map_err(|_| Error::Unavailable)?;
+                Ok(DeviceKeyBinding {
+                    credential: credential.clone(),
+                    key,
+                })
+            })
+            .collect()
     }
     async fn probation(&self, member: &str) -> Result<Option<Option<u64>>> {
         crate::text(member)?;

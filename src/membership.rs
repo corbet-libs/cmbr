@@ -705,20 +705,25 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
     /// The service must require a current member session and explicit device intent.
     /// Credential requests never implicitly authorize keys. Repeated binding of
     /// the same deterministic device is idempotent; key substitution is refused.
-    pub async fn authorize_device_key(
-        &self,
-        auth: &Authentication,
-        key: [u8; 32],
-    ) -> Result<()> {
+    pub async fn authorize_device_key(&self, auth: &Authentication, key: [u8; 32]) -> Result<()> {
         let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
         let row = self.authenticated(auth, self.now()?).await?;
         let current = self.storage.device_keys(row.subject()).await?;
-        let current: Vec<_> = current.iter().filter(|binding| binding.credential == auth.credential_id().as_ref()).collect();
+        let current: Vec<_> = current
+            .iter()
+            .filter(|binding| binding.credential == auth.credential_id().as_ref())
+            .collect();
         if !current.is_empty() {
-            return if current.len() == 1 && current[0].key == key { Ok(()) } else { Err(Error::Identity) };
+            return if current.len() == 1 && current[0].key == key {
+                Ok(())
+            } else {
+                Err(Error::Identity)
+            };
         }
         self.storage.signal_revocation(row.subject()).await?;
-        self.storage.set_device_keys(row.subject(), auth.credential_id().as_ref(), &[key]).await
+        self.storage
+            .set_device_keys(row.subject(), auth.credential_id().as_ref(), &[key])
+            .await
     }
 
     /// Current server authority for pairing and credential composition. A removed
@@ -732,9 +737,18 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
     async fn live_device_keys(&self, row: &Record) -> Result<Vec<[u8; 32]>> {
         let credentials = self.credentials(row.user()).await?;
         let bindings = self.storage.device_keys(row.subject()).await?;
-        Ok(bindings.into_iter().filter(|binding| credentials.iter().any(|credential| {
-            !credential.is_revoked() && credential.credential_id().as_ref() == binding.credential
-        })).map(|binding| binding.key).collect::<std::collections::BTreeSet<_>>().into_iter().collect())
+        Ok(bindings
+            .into_iter()
+            .filter(|binding| {
+                credentials.iter().any(|credential| {
+                    !credential.is_revoked()
+                        && credential.credential_id().as_ref() == binding.credential
+                })
+            })
+            .map(|binding| binding.key)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect())
     }
 
     /// Revoke one owned credential. Losing the last live credential releases the

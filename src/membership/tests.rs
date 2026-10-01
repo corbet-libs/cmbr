@@ -399,7 +399,11 @@ async fn clock_and_storage_errors_leave_no_operation_lock() {
         .enumerate()
         .map(|(i, (name, sql))| crlt::Migration::new(i as u32 + 1, name, sql))
         .collect();
-    migrations.push(crlt::Migration::new(7, "cmbr-device-keys", crate::DEVICE_KEYS_SCHEMA));
+    migrations.push(crlt::Migration::new(
+        7,
+        "cmbr-device-keys",
+        crate::DEVICE_KEYS_SCHEMA,
+    ));
     migrations.push(crlt::Migration::new(
         8,
         "break-probation",

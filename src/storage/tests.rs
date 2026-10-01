@@ -1,12 +1,18 @@
 use super::*;
 
 async fn contract(store: impl Storage) {
-    let key = ed25519_dalek::SigningKey::from_bytes(&[9; 32]).verifying_key().to_bytes();
+    let key = ed25519_dalek::SigningKey::from_bytes(&[9; 32])
+        .verifying_key()
+        .to_bytes();
     store.set_device_keys("a", b"one", &[key]).await.unwrap();
     store.set_device_keys("a", b"two", &[key]).await.unwrap();
     assert_eq!(store.device_keys("a").await.unwrap().len(), 2);
     assert!(store.device_keys("b").await.unwrap().is_empty());
-    for (id, keys) in [(b"".as_slice(), vec![key]), (b"one".as_slice(), vec![key, key]), (b"one".as_slice(), vec![[0; 32]])] {
+    for (id, keys) in [
+        (b"".as_slice(), vec![key]),
+        (b"one".as_slice(), vec![key, key]),
+        (b"one".as_slice(), vec![[0; 32]]),
+    ] {
         assert!(store.set_device_keys("a", id, &keys).await.is_err());
     }
     assert_eq!(store.device_keys("a").await.unwrap().len(), 2);
@@ -51,7 +57,10 @@ async fn libsql_coarse_facts_are_indexed_isolated_and_persistent() {
     let dir = tempfile::tempdir().unwrap();
     let url = format!("file://{}", dir.path().join("facts.db").display());
     let db = crlt::Db::open(crlt::Config::new(&url, "")).await.unwrap();
-    let history = [crlt::Migration::new(1, "cmbr", SCHEMA), crlt::Migration::new(2, "cmbr-device-keys", DEVICE_KEYS_SCHEMA)];
+    let history = [
+        crlt::Migration::new(1, "cmbr", SCHEMA),
+        crlt::Migration::new(2, "cmbr-device-keys", DEVICE_KEYS_SCHEMA),
+    ];
     db.migrate(&history).await.unwrap();
     contract(LibsqlStorage::new(&db, "test").unwrap()).await;
     assert_eq!(

@@ -116,6 +116,7 @@ jobs:
     - uses: Swatinem/rust-cache@v2
       with:
         prefix-key: coverage
+        cache-on-failure: true
     - uses: taiki-e/install-action@v2
       with:
         tool: cargo-llvm-cov

@@ -11,7 +11,7 @@ publish = false
 include = ["Cargo.toml", "src/**", "docs/**", "README.md", "LICENSE.md"]
 
 [dependencies]
-ed25519-dalek = "2.2"
+ed25519-dalek = "3.0"
 cplc = { git = "https://github.com/corbet-libs/cplc", branch = "main" }
 cgts = { git = "https://github.com/corbet-libs/cgts", branch = "main" }
 cgrd = { git = "https://github.com/corbet-foss/cgrd", branch = "main", default-features = false }
@@ -29,7 +29,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["sync", "rt-multi-thread"] }
 
 [dev-dependencies]
-passkey = "0.4"
+passkey = "0.5"
 async-trait = "0.1"
 serde_cbor_2 = "0.13"
 tempfile = "3"

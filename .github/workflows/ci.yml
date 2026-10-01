@@ -41,7 +41,9 @@ jobs:
     - uses: actions/download-artifact@v8
       with: &id002
         name: resolved-lock
-    - run: python3 .github/check-first-party.py
+    - run: 'python3 .github/check-first-party.py
+
+        python3 .github/test-source-coverage.py'
     - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0
       with:
         tool: cargo-deny
@@ -130,10 +132,13 @@ jobs:
     - name: Export source counters from the same execution
       run: cargo llvm-cov report --locked --branch --ignore-filename-regex '(/tests/|/tests\.rs$)' --lcov
         --output-path coverage.lcov
+    - name: Export independent source locations from the same execution
+      run: cargo llvm-cov report --locked --branch --ignore-filename-regex '(/tests/|/tests\.rs$)' --text
+        --output-path coverage.txt
     - name: Require every emitted source line and branch
       run: 'python3 .github/check-coverage.py coverage.json || true
 
-        python3 .github/check-source-coverage.py coverage.lcov coverage.json'
+        python3 .github/check-source-coverage.py coverage.lcov coverage.json coverage.txt'
     - uses: actions/upload-artifact@v7
       if: always()
       with:
@@ -144,7 +149,9 @@ jobs:
 
           Cargo.lock
 
-          resolver.txt'
+          resolver.txt
+
+          coverage.txt'
         retention-days: 7
 'on':
   push:

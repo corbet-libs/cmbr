@@ -206,6 +206,7 @@ impl Storage for MemoryStorage {
     }
     async fn clear_passed_probation(&self, member: &str, now: u64) -> Result<()> {
         crate::text(member)?;
+        i64::try_from(now).map_err(|_| Error::InvalidInput)?;
         if let Some(end) = self.state.lock().await.probation.get_mut(member)
             && end.is_some_and(|end| end <= now)
         {
@@ -214,6 +215,7 @@ impl Storage for MemoryStorage {
         Ok(())
     }
     async fn prune_probation(&self, now: u64, count: usize) -> Result<()> {
+        i64::try_from(now).map_err(|_| Error::InvalidInput)?;
         limit(count)?;
         let mut state = self.state.lock().await;
         for end in state
@@ -265,6 +267,8 @@ impl Storage for MemoryStorage {
             .collect())
     }
     async fn acknowledge(&self, event: &Revocation) -> Result<()> {
+        crate::text(&event.member)?;
+        i64::try_from(event.generation).map_err(|_| Error::InvalidInput)?;
         let mut state = self.state.lock().await;
         if let Some(value) = state.revocations.get_mut(&event.member)
             && value.0 == event.generation

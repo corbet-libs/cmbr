@@ -119,6 +119,9 @@ async fn boundary_contract(store: impl Storage) {
         assert!(store.revocations(count).await.is_err());
         assert!(store.prune_probation(86400, count).await.is_err());
     }
+    assert!(store.clear_passed_probation("bounded", u64::MAX).await.is_err());
+    assert!(store.prune_probation(u64::MAX, 1).await.is_err());
+    assert!(store.acknowledge(&Revocation { member: "bounded".into(), generation: u64::MAX }).await.is_err());
     assert!(!store.revocation_pending("absent").await.unwrap());
     store.clear_passed_probation("absent", 86400).await.unwrap();
     store.initialize_probation("bounded", 86400).await.unwrap();

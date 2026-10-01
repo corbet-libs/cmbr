@@ -498,16 +498,35 @@ async fn issuance_source_holds_live_authority_until_its_lease_is_released() {
     let m = facade(&db, "source-lease", clock.clone());
     let (_, login) = pending(&m, "source-lease").await;
     assert!(m.membership(SUBJECT, now() as u64).await.is_err());
-    m.admit_test(&login.authentication, &policy("source-lease"), &[test_gate("source-lease", SUBJECT)], lease()).await.unwrap();
+    m.admit_test(
+        &login.authentication,
+        &policy("source-lease"),
+        &[test_gate("source-lease", SUBJECT)],
+        lease(),
+    )
+    .await
+    .unwrap();
     let (empty, guard) = m.membership(SUBJECT, now() as u64).await.unwrap();
     assert!(empty.authorized_devices.is_empty());
     drop(guard);
-    assert!(m.authorize_device_key(&login.authentication, [0; 32]).await.is_err());
+    assert!(
+        m.authorize_device_key(&login.authentication, [0; 32])
+            .await
+            .is_err()
+    );
     assert!(m.revocations(10).await.unwrap().is_empty());
-    let key = ed25519_dalek::SigningKey::from_bytes(&[31; 32]).verifying_key().to_bytes();
-    m.authorize_device_key(&login.authentication, key).await.unwrap();
+    let key = ed25519_dalek::SigningKey::from_bytes(&[31; 32])
+        .verifying_key()
+        .to_bytes();
+    m.authorize_device_key(&login.authentication, key)
+        .await
+        .unwrap();
     assert!(m.revocations(10).await.unwrap().is_empty());
-    for (member, at) in [("unknown", now() as u64), (SUBJECT, now() as u64 + 1), (SUBJECT, u64::MAX)] {
+    for (member, at) in [
+        ("unknown", now() as u64),
+        (SUBJECT, now() as u64 + 1),
+        (SUBJECT, u64::MAX),
+    ] {
         assert!(m.membership(member, at).await.is_err());
     }
     let (facts, guard) = m.membership(SUBJECT, now() as u64).await.unwrap();
@@ -517,19 +536,35 @@ async fn issuance_source_holds_live_authority_until_its_lease_is_released() {
     assert_eq!(facts.lease_end % 86400, 0);
     assert!(facts.probation_until.is_some());
     // A competing removal cannot interleave with the held issuance lease.
-    let mut removal = Box::pin(m.revoke_passkey(&login.authentication, login.authentication.credential_id().clone()));
+    let mut removal = Box::pin(m.revoke_passkey(
+        &login.authentication,
+        login.authentication.credential_id().clone(),
+    ));
     std::future::poll_fn(|cx| {
         assert!(std::future::Future::poll(removal.as_mut(), cx).is_pending());
         std::task::Poll::Ready(())
-    }).await;
+    })
+    .await;
     drop(removal);
     drop(guard);
     clock.set(now() + 20 * 86400);
-    let (facts, guard) = m.membership(SUBJECT, (now() + 20 * 86400) as u64).await.unwrap();
+    let (facts, guard) = m
+        .membership(SUBJECT, (now() + 20 * 86400) as u64)
+        .await
+        .unwrap();
     assert!(facts.probation_until.is_none());
     assert_eq!(facts.authorized_devices, vec![key]);
     drop(guard);
-    m.revoke_passkey(&login.authentication, login.authentication.credential_id().clone()).await.unwrap();
-    assert!(m.membership(SUBJECT, (now() + 20 * 86400) as u64).await.is_err());
+    m.revoke_passkey(
+        &login.authentication,
+        login.authentication.credential_id().clone(),
+    )
+    .await
+    .unwrap();
+    assert!(
+        m.membership(SUBJECT, (now() + 20 * 86400) as u64)
+            .await
+            .is_err()
+    );
     assert_eq!(m.revocations(10).await.unwrap().len(), 1);
 }

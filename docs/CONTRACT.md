@@ -179,7 +179,8 @@ probation or records a login date. The user handle is not authority by itself.
 The service bounds, throttles, expires and binds pending ceremonies to clients.
 
 Creation now requests resident credentials. All server options pass unchanged
-through the service to device-side Keyhole; only Keyhole adds its local PRF input.
+through the service to device-side Passkeys (`cpky`); only Passkeys adds its local
+PRF input. Server-side Keyhole (`ckyh`) rejects PRF-bearing responses.
 It must strip the entire PRF extension before sending a response. Deserialize
 responses directly into ckyh's guarded wire types: parsing into upstream types
 first would discard the extension before it can be refused. Both registration

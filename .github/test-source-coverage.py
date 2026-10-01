@@ -18,6 +18,16 @@ def check(lcov, raw, root, annotated=ANNOTATED):
 
 
 class GateTests(unittest.TestCase):
+    def test_heading_free_report_requires_one_agreed_source(self):
+        check(LCOV, RAW, ROOT, annotated=ANNOTATED.split('\n', 1)[1])
+        raw = copy.deepcopy(RAW)
+        second = copy.deepcopy(raw['data'][0]['files'][0])
+        second['filename'] = str(ROOT / 'src/other.rs')
+        raw['data'][0]['files'].append(second)
+        with self.assertRaises(ValueError):
+            check(LCOV + LCOV.replace('src/lib.rs', 'src/other.rs'), raw, ROOT,
+                  annotated=ANNOTATED.split('\n', 1)[1])
+
     def test_complete_source_coverage(self):
         check(LCOV, RAW, ROOT)
 

@@ -99,7 +99,11 @@ def check(lcov, raw_json, root, annotated):
     # upstream annotated report. Summary counts alone can include generic copies
     # and therefore cannot detect a deleted DA record reliably.
     annotated_lines, annotated_files = {}, set()
-    current = None
+    heading_free = not any(row.endswith('.rs:') and row.startswith('/')
+                           for row in annotated.splitlines())
+    current = next(iter(files)) if heading_free and len(files) == 1 else None
+    if current is not None:
+        annotated_files.add(current)
     for record in annotated.splitlines():
         if record.endswith('.rs:') and record.startswith('/'):
             current = source_path(record[:-1])

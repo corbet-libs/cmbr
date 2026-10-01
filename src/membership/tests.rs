@@ -576,20 +576,42 @@ async fn invalid_configuration_registration_and_worker_failure_are_refused() {
         let mut value = config();
         value.lease_months = months;
         assert!(matches!(
-            super::Membership::new(&db, crate::MemoryStorage::new("bounds").unwrap(), value, Verify, Clock::new()),
+            super::Membership::new(
+                &db,
+                crate::MemoryStorage::new("bounds").unwrap(),
+                value,
+                Verify,
+                Clock::new()
+            ),
             Err(Error::InvalidInput)
         ));
     }
     let m = facade(&db, "bounds", Clock::new());
-    assert!(matches!(m.begin_registration(Uuid::nil(), SUBJECT).await, Err(Error::InvalidInput)));
-    assert!(matches!(m.begin_registration(USER, "private\nsubject").await, Err(Error::InvalidInput)));
-    assert_eq!(blocking::<()>(|| panic!("synthetic worker failure")).await, Err(Error::Unavailable));
-    assert_eq!(blocking::<()>(|| Err(ckyh::Error::Storage)).await, Err(Error::Unavailable));
+    assert!(matches!(
+        m.begin_registration(Uuid::nil(), SUBJECT).await,
+        Err(Error::InvalidInput)
+    ));
+    assert!(matches!(
+        m.begin_registration(USER, "private\nsubject").await,
+        Err(Error::InvalidInput)
+    ));
+    assert_eq!(
+        blocking::<()>(|| panic!("synthetic worker failure")).await,
+        Err(Error::Unavailable)
+    );
+    assert_eq!(
+        blocking::<()>(|| Err(ckyh::Error::Storage)).await,
+        Err(Error::Unavailable)
+    );
     for time in [-1, i64::MAX, 253402300800] {
         assert_eq!(date(time), Err(Error::InvalidInput));
     }
     let pin = crate::PinV2::seal(
-        &cpns::FingerprintContext { community: "bounds", member: "private-member", field: "private-field" },
+        &cpns::FingerprintContext {
+            community: "bounds",
+            member: "private-member",
+            field: "private-field",
+        },
         b"private-value",
         &cpns::Salt::from_bytes(vec![42; 32]).unwrap(),
     );

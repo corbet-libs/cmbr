@@ -506,15 +506,7 @@ async fn issuance_source_holds_live_authority_until_its_lease_is_released() {
     assert!(m.revocations(10).await.unwrap().is_empty());
     let key = ed25519_dalek::SigningKey::from_bytes(&[31; 32]).verifying_key().to_bytes();
     m.authorize_device_key(&login.authentication, key).await.unwrap();
-    assert!(m.membership(SUBJECT, now() as u64).await.is_err());
-    // The same real publication/acknowledgement ordering used by the composition.
-    let mut policy = verified_policy(&policy("source-lease"), now()).await;
-    policy.bump_epoch().await.unwrap();
-    policy.publish(cplc::SnapshotKind::Settings, now() as u64).await.unwrap();
-    policy.publish(cplc::SnapshotKind::RevocationList, now() as u64).await.unwrap();
-    for event in m.revocations(10).await.unwrap() {
-        m.acknowledge_revocation(&event).await.unwrap();
-    }
+    assert!(m.revocations(10).await.unwrap().is_empty());
     for (member, at) in [("unknown", now() as u64), (SUBJECT, now() as u64 + 1), (SUBJECT, u64::MAX)] {
         assert!(m.membership(member, at).await.is_err());
     }
@@ -539,4 +531,5 @@ async fn issuance_source_holds_live_authority_until_its_lease_is_released() {
     drop(guard);
     m.revoke_passkey(&login.authentication, login.authentication.credential_id().clone()).await.unwrap();
     assert!(m.membership(SUBJECT, (now() + 20 * 86400) as u64).await.is_err());
+    assert_eq!(m.revocations(10).await.unwrap().len(), 1);
 }

@@ -721,7 +721,9 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
                 Err(Error::Identity)
             };
         }
-        self.storage.signal_revocation(row.subject()).await?;
+        // Adding authority under the held issuance lease leaves every previous
+        // credential valid. Only removal needs a public revocation; publishing
+        // an epoch here would reveal ordinary registration and device additions.
         self.storage
             .set_device_keys(row.subject(), auth.credential_id().as_ref(), &[key])
             .await

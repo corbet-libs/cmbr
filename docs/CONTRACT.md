@@ -196,9 +196,11 @@ idempotent; a different key cannot replace it. The service must expose this as
 an explicit authenticated device operation; raw credential-request keys are not
 an instruction to authorize themselves.
 
-A durable revocation event precedes the initial binding. The door must flush that
-event and publish the new epoch before returning success. `current_device_keys`
-filters each binding against the current unrevoked credentials on every read, so
+A new binding is serialized with issuance and leaves existing credentials valid.
+It never emits a public epoch change: ordinary registration and device additions
+must not become trust-feed activity signals. Key removal retains the existing
+durable revocation outbox. `current_device_keys` filters each binding against
+the current unrevoked credentials on every read, so
 passkey removal refuses further authority immediately, even before storage cleanup
 or device synchronization. It supplies current server authority to the pairing
 adapter; that adapter must additionally verify the exact ckmg root, epoch, lineage

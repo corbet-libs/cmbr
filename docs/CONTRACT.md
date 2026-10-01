@@ -152,3 +152,17 @@ expiry, leases and signed community credentials retain their coarse time rules.
 An explicit admitted-to-lapsed transition queues its generation-tagged revocation
 before committing the lifecycle change. Repeated lapse does not create a second
 event. The cmnt relay publishes the epoch before acknowledging that event.
+
+## Additional passkeys
+
+A passkey ecosystem is a device. A member with a valid UV-authenticated session
+can register another UV-required passkey for the same membership through
+`begin_additional_registration` / `finish_additional_registration`. The service
+binds the single-use server state to the initiating session and checks its expiry.
+cmbr rechecks the exact key, member and live lifecycle at both boundaries; cpky
+atomically refuses insertion if the authorizing key was revoked. Addition preserves
+the pseudonym, handle, lease, pins and probation. No manual approval is involved.
+
+Revocation invalidates sessions of that key immediately. A remaining passkey keeps
+the same membership usable. Losing or removing every passkey releases it
+permanently: no recovery, and NO RETURN under a fresh registration identifier.

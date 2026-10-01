@@ -318,3 +318,164 @@ async fn handle_availability_and_exact_session_revocation_use_real_leaves() {
             .is_err()
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn additional_device_preserves_membership_and_survives_original_removal() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "a", Clock::new());
+    let (_, first) = pending(&m, "a").await;
+    let admitted = m
+        .admit_test(
+            &first.authentication,
+            &policy("a"),
+            &[test_gate("a", SUBJECT)],
+            lease(),
+        )
+        .await
+        .unwrap();
+    let (options, state) = m
+        .begin_additional_registration(&first.authentication)
+        .await
+        .unwrap();
+    let mut second = SoftToken::new(true).unwrap().0;
+    let response = second
+        .perform_register(
+            cpky::Url::parse(ORIGIN).unwrap(),
+            options.public_key,
+            300_000,
+        )
+        .unwrap();
+    let added = m
+        .finish_additional_registration(&first.authentication, state, response)
+        .await
+        .unwrap();
+    assert_eq!(added.member(), USER);
+    assert_eq!(m.resume(&first.authentication).await.unwrap(), admitted);
+    let survivor = login(&m, &mut second, USER).await;
+    assert_eq!(survivor.enrolment, admitted);
+    m.revoke_passkey(
+        &survivor.authentication,
+        first.authentication.credential_id().clone(),
+    )
+    .await
+    .unwrap();
+    assert!(m.resume(&first.authentication).await.is_err());
+    assert!(
+        m.begin_additional_registration(&first.authentication)
+            .await
+            .is_err()
+    );
+    assert!(
+        m.session_is_active(&survivor.authentication, added.credential_id())
+            .await
+            .unwrap()
+    );
+    drop(m);
+    let m = facade(&db, "a", Clock::new());
+    let survivor = login(&m, &mut second, USER).await;
+    assert_eq!(survivor.enrolment, admitted);
+    assert_eq!(
+        m.handle(&survivor.authentication)
+            .await
+            .unwrap()
+            .unwrap()
+            .display(),
+        HANDLE
+    );
+    assert_eq!(
+        m.revoke_passkey(&survivor.authentication, added.credential_id().clone())
+            .await
+            .unwrap()
+            .state(),
+        State::Released
+    );
+    assert!(
+        m.begin_registration(cpky::Uuid::from_u128(9), SUBJECT)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn additional_registration_rejects_substitution_revocation_and_expiry() {
+    let (_dir, db) = temporary().await;
+    let clock = Clock::new();
+    let m = facade(&db, "a", clock.clone());
+    let (_, first) = pending(&m, "a").await;
+    let mut other_device = register(&m, cpky::Uuid::from_u128(2), "another-member").await;
+    let other = login(&m, &mut other_device, cpky::Uuid::from_u128(2)).await;
+    let (options, state) = m
+        .begin_additional_registration(&first.authentication)
+        .await
+        .unwrap();
+    let response = SoftToken::new(true)
+        .unwrap()
+        .0
+        .perform_register(
+            cpky::Url::parse(ORIGIN).unwrap(),
+            options.public_key,
+            300_000,
+        )
+        .unwrap();
+    assert!(matches!(
+        m.finish_additional_registration(&other.authentication, state, response)
+            .await,
+        Err(Error::Identity)
+    ));
+    let foreign = facade(&db, "b", clock.clone());
+    assert!(
+        foreign
+            .begin_additional_registration(&first.authentication)
+            .await
+            .is_err()
+    );
+    let (options, state) = m
+        .begin_additional_registration(&other.authentication)
+        .await
+        .unwrap();
+    let response = SoftToken::new(true)
+        .unwrap()
+        .0
+        .perform_register(
+            cpky::Url::parse(ORIGIN).unwrap(),
+            options.public_key,
+            300_000,
+        )
+        .unwrap();
+    m.revoke_passkey(
+        &other.authentication,
+        other.authentication.credential_id().clone(),
+    )
+    .await
+    .unwrap();
+    assert!(
+        m.finish_additional_registration(&other.authentication, state, response)
+            .await
+            .is_err()
+    );
+    let (options, state) = m
+        .begin_additional_registration(&first.authentication)
+        .await
+        .unwrap();
+    let response = SoftToken::new(true)
+        .unwrap()
+        .0
+        .perform_register(
+            cpky::Url::parse(ORIGIN).unwrap(),
+            options.public_key,
+            300_000,
+        )
+        .unwrap();
+
+    clock.set(first.enrolment.expires_at().unwrap());
+    assert!(
+        m.finish_additional_registration(&first.authentication, state, response)
+            .await
+            .is_err()
+    );
+    assert!(
+        m.begin_additional_registration(&first.authentication)
+            .await
+            .is_err()
+    );
+}

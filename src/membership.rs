@@ -29,6 +29,13 @@ pub struct PendingRegistration {
     user: Uuid,
     pending: cpky::PendingRegistration,
 }
+/// Single-use additional registration bound to its authenticating passkey.
+/// The caller keeps it in the initiating live session; it cannot be serialized.
+pub struct PendingAdditionalRegistration {
+    user: Uuid,
+    authorizer: cpky::CredentialID,
+    pending: cpky::PendingRegistration,
+}
 /// Server-only single-use login state.
 pub struct PendingLogin {
     user: Uuid,
@@ -172,7 +179,7 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
     /// Begin first registration for a service-verified community pseudonym.
     /// UUIDs are community-local, nonnil and must not be derived from global IDs.
     /// This trusted API is not permission to bind arbitrary client-supplied IDs.
-    /// Adding more passkeys needs a separate approved device flow, not this API.
+    /// Additional passkeys use the authenticated additional-registration flow.
     pub async fn begin_registration(
         &self,
         user: Uuid,
@@ -223,6 +230,52 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
                 .await?)
         }
         .await
+    }
+
+    /// Begin another UV-required passkey for this existing membership.
+    /// The service validates session lifetime. No new pseudonym, membership,
+    /// manual approval or recovery path is created.
+    pub async fn begin_additional_registration(
+        &self,
+        auth: &Authentication,
+    ) -> Result<(
+        cpky::CreationChallengeResponse,
+        PendingAdditionalRegistration,
+    )> {
+        let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        let row = self.authenticated(auth, self.now()?).await?;
+        let keys = self.passkeys.clone();
+        let authentication = auth.clone();
+        let (challenge, pending) =
+            blocking(move || keys.start_additional_registration(&authentication)).await?;
+        Ok((
+            challenge,
+            PendingAdditionalRegistration {
+                user: row.user(),
+                authorizer: auth.credential_id().clone(),
+                pending,
+            },
+        ))
+    }
+
+    /// Complete an addition from the same live session and exact authorizing key.
+    /// cpky requires UV and rechecks the authorizer atomically with insertion.
+    /// Adding a key preserves lifecycle, handle, lease, pins and probation.
+    pub async fn finish_additional_registration(
+        &self,
+        auth: &Authentication,
+        state: PendingAdditionalRegistration,
+        response: cpky::RegisterPublicKeyCredential,
+    ) -> Result<cpky::StoredPasskey> {
+        let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        if state.user != auth.member() || state.authorizer != *auth.credential_id() {
+            return Err(Error::Identity);
+        }
+        self.authenticated(auth, self.now()?).await?;
+        let date = date(self.now()?)?;
+        let month = cpky::CreationMonth::new(date.year() as u16, date.month() as u8)?;
+        let keys = self.passkeys.clone();
+        blocking(move || keys.finish_registration(state.pending, &response, month)).await
     }
 
     /// Private credential-first login. The wallet supplies its stored key ID;

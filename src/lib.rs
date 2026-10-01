@@ -10,7 +10,8 @@ pub use pins::PinV2;
 mod storage;
 
 pub use membership::{
-    Config, Lobby, Login, Membership, PendingLogin, PendingRegistration, Warning,
+    Config, Lobby, Login, Membership, PendingAdditionalRegistration, PendingLogin,
+    PendingRegistration, Warning,
 };
 pub use storage::{LibsqlStorage, MemoryStorage, Revocation, SCHEMA, Storage};
 // Export protocol values only; callers cannot reach leaf writers through cmbr.

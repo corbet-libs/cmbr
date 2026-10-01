@@ -24,7 +24,7 @@ pub use crgs::{Handle, Member, YearMonth};
 /// The root assigns contiguous versions; leaves never migrate independently.
 pub const SCHEMAS: [(&str, &str); 6] = [
     ("cmbr", SCHEMA),
-    ("ckyh", ckyh::LIBSQL_SCHEMA),
+    ("cpky", ckyh::LIBSQL_SCHEMA),
     ("crgs", crgs::SCHEMA),
     ("cnrl", cnrl::SCHEMA),
     ("cpns", cpns::server::libsql::SCHEMA),

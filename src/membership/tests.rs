@@ -489,3 +489,54 @@ async fn explicit_lapse_queues_durable_revocation_before_readmission() {
         .unwrap();
     assert_eq!(m.revocations(10).await.unwrap(), events);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn issuance_source_holds_live_authority_until_its_lease_is_released() {
+    use cplc::MembershipSource;
+    let (_dir, db) = temporary().await;
+    let clock = Clock::new();
+    let m = facade(&db, "source-lease", clock.clone());
+    let (_, login) = pending(&m, "source-lease").await;
+    assert!(m.membership(SUBJECT, now() as u64).await.is_err());
+    m.admit_test(&login.authentication, &policy("source-lease"), &[test_gate("source-lease", SUBJECT)], lease()).await.unwrap();
+    let (empty, guard) = m.membership(SUBJECT, now() as u64).await.unwrap();
+    assert!(empty.authorized_devices.is_empty());
+    drop(guard);
+    assert!(m.authorize_device_key(&login.authentication, [0; 32]).await.is_err());
+    assert!(m.revocations(10).await.unwrap().is_empty());
+    let key = ed25519_dalek::SigningKey::from_bytes(&[31; 32]).verifying_key().to_bytes();
+    m.authorize_device_key(&login.authentication, key).await.unwrap();
+    assert!(m.membership(SUBJECT, now() as u64).await.is_err());
+    // The same real publication/acknowledgement ordering used by the composition.
+    let mut policy = verified_policy(&policy("source-lease"), now()).await;
+    policy.bump_epoch().await.unwrap();
+    policy.publish(cplc::SnapshotKind::Settings, now() as u64).await.unwrap();
+    policy.publish(cplc::SnapshotKind::RevocationList, now() as u64).await.unwrap();
+    for event in m.revocations(10).await.unwrap() {
+        m.acknowledge_revocation(&event).await.unwrap();
+    }
+    for (member, at) in [("unknown", now() as u64), (SUBJECT, now() as u64 + 1), (SUBJECT, u64::MAX)] {
+        assert!(m.membership(member, at).await.is_err());
+    }
+    let (facts, guard) = m.membership(SUBJECT, now() as u64).await.unwrap();
+    assert_eq!(facts.community, "source-lease");
+    assert_eq!(facts.member, SUBJECT);
+    assert_eq!(facts.authorized_devices, vec![key]);
+    assert_eq!(facts.lease_end % 86400, 0);
+    assert!(facts.probation_until.is_some());
+    // A competing removal cannot interleave with the held issuance lease.
+    let mut removal = Box::pin(m.revoke_passkey(&login.authentication, login.authentication.credential_id().clone()));
+    std::future::poll_fn(|cx| {
+        assert!(std::future::Future::poll(removal.as_mut(), cx).is_pending());
+        std::task::Poll::Ready(())
+    }).await;
+    drop(removal);
+    drop(guard);
+    clock.set(now() + 20 * 86400);
+    let (facts, guard) = m.membership(SUBJECT, (now() + 20 * 86400) as u64).await.unwrap();
+    assert!(facts.probation_until.is_none());
+    assert_eq!(facts.authorized_devices, vec![key]);
+    drop(guard);
+    m.revoke_passkey(&login.authentication, login.authentication.credential_id().clone()).await.unwrap();
+    assert!(m.membership(SUBJECT, (now() + 20 * 86400) as u64).await.is_err());
+}

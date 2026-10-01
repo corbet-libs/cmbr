@@ -97,7 +97,7 @@ pub trait Storage: Send + Sync {
     /// Clear only after cplc durably advanced its epoch and published fresh trust.
     fn acknowledge(&self, event: &Revocation) -> impl Future<Output = Result<()>> + Send;
 }
-fn device_input(member: &str, credential: &[u8], keys: &[[u8; 32]]) -> Result<()> {
+pub(crate) fn device_input(member: &str, credential: &[u8], keys: &[[u8; 32]]) -> Result<()> {
     crate::text(member)?;
     if credential.is_empty()
         || credential.len() > 1024

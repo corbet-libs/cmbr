@@ -708,6 +708,7 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
     pub async fn authorize_device_key(&self, auth: &Authentication, key: [u8; 32]) -> Result<()> {
         let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
         let row = self.authenticated(auth, self.now()?).await?;
+        crate::storage::device_input(row.subject(), auth.credential_id().as_ref(), &[key])?;
         let current = self.storage.device_keys(row.subject()).await?;
         let current: Vec<_> = current
             .iter()

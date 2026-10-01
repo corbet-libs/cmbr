@@ -1,6 +1,7 @@
 use super::*;
 
 async fn contract(store: impl Storage) {
+    store.acknowledge(&Revocation { member: "never-recorded".into(), generation: 1 }).await.unwrap();
     let key = ed25519_dalek::SigningKey::from_bytes(&[9; 32])
         .verifying_key()
         .to_bytes();
@@ -342,4 +343,32 @@ async fn libsql_rejects_real_dynamic_type_corruption_and_keeps_atomic_outbox() {
         .await
         .unwrap();
     assert_eq!(store.probation("bounded").await, Err(Error::Unavailable));
+}
+
+#[tokio::test]
+async fn malformed_imported_integer_columns_never_create_authority() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = crlt::Db::open(crlt::Config::new(
+        format!("file://{}", dir.path().join("imported.db").display()), "",
+    )).await.unwrap();
+    // Reproduce an imported database missing the newer numeric constraints.
+    // Queries still use real scoped SQL, the actual indexes and libSQL values.
+    let imported = SCHEMA
+        .replace(" CHECK (probation_until >= 0 AND probation_until % 86400 = 0)", "")
+        .replace(" CHECK (generation > 0)", "")
+        .replace(" CHECK (pending IN (0,1))", "");
+    db.migrate(&[crlt::Migration::new(1, "imported-membership", &imported)]).await.unwrap();
+    let store = LibsqlStorage::new(&db, "imported").unwrap();
+    store.initialize_probation("subject", 86400).await.unwrap();
+    for value in [-1, 86401] {
+        store.scope.execute("UPDATE cmbr_probation SET probation_until = ?1 WHERE subject = ?2", params![value, "subject"]).await.unwrap();
+        assert_eq!(store.probation("subject").await, Err(Error::Unavailable));
+    }
+    store.signal_revocation("subject").await.unwrap();
+    for value in [-1, 0] {
+        store.scope.execute("UPDATE cmbr_revocations SET generation = ?1 WHERE subject = ?2", params![value, "subject"]).await.unwrap();
+        assert!(matches!(store.revocations(10).await, Err(Error::Unavailable)));
+    }
+    store.scope.execute("UPDATE cmbr_revocations SET pending = ?1 WHERE subject = ?2", params!["corrupt", "subject"]).await.unwrap();
+    assert_eq!(store.revocation_pending("subject").await, Err(Error::Unavailable));
 }

@@ -649,6 +649,9 @@ async fn invalid_configuration_registration_and_worker_failure_are_refused() {
             Err(Error::InvalidInput)
         ));
     }
+    let mut mismatched = config();
+    mismatched.rp_id = "foreign.example.org".into();
+    assert!(super::Membership::new(&db, crate::MemoryStorage::new("bounds").unwrap(), mismatched, Verify, Clock::new()).is_err());
     let m = facade(&db, "bounds", Clock::new());
     assert!(matches!(
         m.begin_registration(Uuid::nil(), SUBJECT).await,
@@ -679,4 +682,89 @@ async fn invalid_configuration_registration_and_worker_failure_are_refused() {
         &cpns::Salt::from_bytes(vec![42; 32]).unwrap(),
     );
     assert_eq!(format!("{pin:?}"), "PinV2([redacted])");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn live_owner_receipts_refuse_foreign_scopes_and_stale_register_rows() {
+    use cplc::MembershipSource;
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "owner-boundaries", Clock::new());
+    let (_, login) = pending(&m, "owner-boundaries").await;
+    let foreign = facade(&db, "foreign", Clock::new());
+    let foreign_row = foreign.enrol.start(USER, SUBJECT, now()).await.unwrap();
+    assert_eq!(m.check_record(&foreign_row), Err(Error::Identity));
+    for mut order in [ban("foreign"), ban("owner-boundaries")] {
+        if order.order.community == "owner-boundaries" {
+            order.order.subject = "another-subject".into();
+        }
+        assert_eq!(m.self_ban(&login.authentication, &order).await, Err(Error::Identity));
+    }
+    assert!(m.revocations(10).await.unwrap().is_empty());
+    let raw = policy("owner-boundaries");
+    m.admit_test(&login.authentication, &raw, &[test_gate("owner-boundaries", SUBJECT)], lease()).await.unwrap();
+    let first_key = ed25519_dalek::SigningKey::from_bytes(&[61; 32]).verifying_key().to_bytes();
+    let second_key = ed25519_dalek::SigningKey::from_bytes(&[62; 32]).verifying_key().to_bytes();
+    // Import a genuine historical multi-key binding through the actual owner store.
+    m.storage.set_device_keys(SUBJECT, login.authentication.credential_id().as_ref(), &[first_key, second_key]).await.unwrap();
+    assert_eq!(m.authorize_device_key(&login.authentication, first_key).await, Err(Error::Identity));
+    // The register has actually released the handle, while Enrol still reflects admission.
+    let late = "2030-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+    m.register.release_expired(late, 10).await.unwrap();
+    assert!(m.membership(SUBJECT, now() as u64).await.is_err());
+    assert_eq!(m.admit_test(&login.authentication, &raw, &[test_gate("owner-boundaries", SUBJECT)], lease()).await, Err(Error::Register));
+    assert!(m.revocations(10).await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn temporary_legal_restriction_lapses_without_terminating_the_member() {
+    use ed25519_dalek::Signer;
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "temporary-order", Clock::new());
+    let (_, login) = pending(&m, "temporary-order").await;
+    m.admit_test(&login.authentication, &policy("temporary-order"), &[test_gate("temporary-order", SUBJECT)], lease()).await.unwrap();
+    let mut signed = ban("temporary-order");
+    signed.order.kind = clbs::OrderKind::Legal { authority: "fixture-authority".into() };
+    signed.order.period.ends_at = Some(now() + 3600);
+    signed.proof = ed25519_dalek::SigningKey::from_bytes(&[7; 32]).sign(&signed.order.signing_payload().unwrap()).to_bytes().to_vec();
+    m.legal.record_legal(&signed).await.unwrap();
+    assert_eq!(m.enrolment_state(USER).await.unwrap().state(), State::Lapsed);
+    assert!(m.resume(&login.authentication).await.is_err());
+    assert_eq!(m.revocations(10).await.unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn raw_key_removal_cannot_leave_membership_issuance_authority() {
+    use cplc::MembershipSource;
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "issuance-reconcile", Clock::new());
+    let (_, login) = pending(&m, "issuance-reconcile").await;
+    m.admit_test(&login.authentication, &policy("issuance-reconcile"), &[test_gate("issuance-reconcile", SUBJECT)], lease()).await.unwrap();
+    let keys = m.passkeys.clone();
+    let id = login.authentication.credential_id().clone();
+    blocking(move || keys.revoke(USER, &id)).await.unwrap();
+    assert!(m.membership(SUBJECT, now() as u64).await.is_err());
+    let released = m.enrolment_state(USER).await.unwrap();
+    assert_eq!(released.state(), State::Released);
+    assert_eq!(m.release_if_lost(released.clone(), now()).await.unwrap(), released);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fresh_policy_cannot_renew_a_lazily_released_handle() {
+    use cplc::MembershipSource;
+    let (_dir, db) = temporary().await;
+    let clock = Clock::new();
+    let m = facade(&db, "lazy-release", clock.clone());
+    let (_, login) = pending(&m, "lazy-release").await;
+    let raw = policy("lazy-release");
+    m.admit_test(&login.authentication, &raw, &[test_gate("lazy-release", SUBJECT)], lease()).await.unwrap();
+    let later = "2030-01-01T12:00:00Z".parse::<DateTime<Utc>>().unwrap().timestamp();
+    clock.set(later);
+    let mut policy = verified_policy(&raw, later).await;
+    let snapshot = policy.verified_settings(later as u64).await.unwrap();
+    let mut gate = test_gate("lazy-release", SUBJECT);
+    gate.valid_until = later + 3600;
+    let gates = checked(&snapshot, SUBJECT, &[gate], later).await;
+    assert_eq!(m.admit(&login.authentication, &policy, &snapshot, &gates, crgs::YearMonth::new(2031, 1).unwrap()).await, Err(Error::Transition));
+    assert!(m.membership(SUBJECT, later as u64).await.is_err());
+    assert_eq!(m.enrolment_state(USER).await.unwrap().state(), State::Released);
 }

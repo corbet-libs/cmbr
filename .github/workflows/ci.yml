@@ -127,13 +127,20 @@ jobs:
 
         cargo llvm-cov --locked --workspace --all-features --branch --no-cfg-coverage --no-cfg-coverage-nightly
         --ignore-filename-regex ''(/tests/|/tests\.rs$)'' --json --output-path coverage.json'
-    - name: Require every reachable line and branch
-      run: python3 .github/check-coverage.py coverage.json
+    - name: Export source counters from the same execution
+      run: cargo llvm-cov report --locked --branch --ignore-filename-regex '(/tests/|/tests\.rs$)' --lcov
+        --output-path coverage.lcov
+    - name: Require every emitted source line and branch
+      run: 'python3 .github/check-coverage.py coverage.json || true
+
+        python3 .github/check-source-coverage.py coverage.lcov coverage.json'
     - uses: actions/upload-artifact@v7
       if: always()
       with:
         name: coverage
-        path: 'coverage.json
+        path: 'coverage.lcov
+
+          coverage.json
 
           Cargo.lock
 

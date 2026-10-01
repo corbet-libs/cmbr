@@ -805,7 +805,7 @@ dependencies = [
 [[package]]
 name = "cgts"
 version = "0.0.0"
-source = "git+https://github.com/corbet-libs/cgts?branch=main#22c93bfa5e70e3cdce6c064c5ab2666b9f665de5"
+source = "git+https://github.com/corbet-libs/cgts?branch=main#f8dd44847a4ee099f4eedc972e63316b120e8693"
 dependencies = [
  "cblc",
  "cgrd",
@@ -1283,7 +1283,7 @@ dependencies = [
 [[package]]
 name = "crgs"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/crgs?branch=main#fd15ceff1ab8fa8f9ec57024ab53f3698887e367"
+source = "git+https://github.com/corbet-foss/crgs?branch=main#735983938b2c553ad5927eba764fac39f0b2e187"
 dependencies = [
  "chrono",
  "crlt",

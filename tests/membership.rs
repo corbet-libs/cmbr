@@ -411,15 +411,32 @@ async fn additional_device_preserves_membership_and_survives_original_removal() 
     assert_eq!(m.resume(&first.authentication).await.unwrap(), admitted);
     let survivor = login(&m, &mut second, USER).await;
     assert_eq!(survivor.enrolment, admitted);
-    assert!(!m.session_is_active(&first.authentication, added.credential_id()).await.unwrap());
-    let (challenge, pending) = m.begin_additional_registration(&first.authentication).await.unwrap();
+    assert!(
+        !m.session_is_active(&first.authentication, added.credential_id())
+            .await
+            .unwrap()
+    );
+    let (challenge, pending) = m
+        .begin_additional_registration(&first.authentication)
+        .await
+        .unwrap();
     let mut request = challenge.public_key;
-    request.authenticator_selection.as_mut().unwrap().require_resident_key = false;
-    let response = SoftToken::new(true).unwrap().0.perform_register(
-        ckyh::Url::parse(ORIGIN).unwrap(), request, 300_000,
-    ).unwrap();
+    request
+        .authenticator_selection
+        .as_mut()
+        .unwrap()
+        .require_resident_key = false;
+    let response = SoftToken::new(true)
+        .unwrap()
+        .0
+        .perform_register(ckyh::Url::parse(ORIGIN).unwrap(), request, 300_000)
+        .unwrap();
     // Both sessions belong to the same member, but the ceremony authorizer is exact.
-    assert!(matches!(m.finish_additional_registration(&survivor.authentication, pending, response.into()).await, Err(Error::Identity)));
+    assert!(matches!(
+        m.finish_additional_registration(&survivor.authentication, pending, response.into())
+            .await,
+        Err(Error::Identity)
+    ));
     m.authorize_device_key(&survivor.authentication, key_two)
         .await
         .unwrap();

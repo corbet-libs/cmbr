@@ -83,7 +83,10 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
     })
     .await
     .unwrap();
-    assert!(matches!(m.begin_registration(USER, SUBJECT).await, Err(Error::Transition)));
+    assert!(matches!(
+        m.begin_registration(USER, SUBJECT).await,
+        Err(Error::Transition)
+    ));
     assert_eq!(
         m.enrolment_state(USER).await.unwrap().state(),
         State::PasskeyRegistered
@@ -94,12 +97,26 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
     );
 }
 
-fn registration_reply(mut challenge: ckyh::CreationChallengeResponse) -> ckyh::RegisterPublicKeyCredential {
+fn registration_reply(
+    mut challenge: ckyh::CreationChallengeResponse,
+) -> ckyh::RegisterPublicKeyCredential {
     use webauthn_authenticator_rs::{AuthenticatorBackend, softtoken::SoftToken};
-    challenge.public_key.authenticator_selection.as_mut().unwrap().require_resident_key = false;
-    SoftToken::new(true).unwrap().0.perform_register(
-        ckyh::Url::parse(ORIGIN).unwrap(), challenge.public_key, 300_000,
-    ).unwrap().into()
+    challenge
+        .public_key
+        .authenticator_selection
+        .as_mut()
+        .unwrap()
+        .require_resident_key = false;
+    SoftToken::new(true)
+        .unwrap()
+        .0
+        .perform_register(
+            ckyh::Url::parse(ORIGIN).unwrap(),
+            challenge.public_key,
+            300_000,
+        )
+        .unwrap()
+        .into()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -108,13 +125,23 @@ async fn pending_registrations_cannot_finish_after_registration_or_release() {
     let m = facade(&db, "registration-race", Clock::new());
     let (first, first_state) = m.begin_registration(USER, SUBJECT).await.unwrap();
     let (second, second_state) = m.begin_registration(USER, SUBJECT).await.unwrap();
-    m.finish_registration(first_state, registration_reply(first)).await.unwrap();
-    assert!(matches!(m.finish_registration(second_state, registration_reply(second)).await, Err(Error::Transition)));
+    m.finish_registration(first_state, registration_reply(first))
+        .await
+        .unwrap();
+    assert!(matches!(
+        m.finish_registration(second_state, registration_reply(second))
+            .await,
+        Err(Error::Transition)
+    ));
 
     let m = facade(&db, "release-race", Clock::new());
     let (challenge, state) = m.begin_registration(USER, SUBJECT).await.unwrap();
     assert_eq!(m.release(USER).await.unwrap().state(), State::Released);
-    assert!(matches!(m.finish_registration(state, registration_reply(challenge)).await, Err(Error::Transition)));
+    assert!(matches!(
+        m.finish_registration(state, registration_reply(challenge))
+            .await,
+        Err(Error::Transition)
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -125,7 +152,10 @@ async fn lost_revocation_completion_is_reconciled_from_actual_keyhole_state() {
     let keys = m.passkeys.clone();
     let id = login.authentication.credential_id().clone();
     blocking(move || keys.revoke(USER, &id)).await.unwrap();
-    assert_eq!(m.enrolment_state(USER).await.unwrap().state(), State::Released);
+    assert_eq!(
+        m.enrolment_state(USER).await.unwrap().state(),
+        State::Released
+    );
     assert_eq!(m.revocations(10).await.unwrap().len(), 1);
 }
 
@@ -137,18 +167,59 @@ async fn current_membership_requires_publication_before_outbox_acknowledgement()
     let (_, login) = pending(&m, "publication").await;
     let raw = policy("publication");
     let gate = test_gate("publication", SUBJECT);
-    assert_eq!(m.admit_test(&login.authentication, &raw, std::slice::from_ref(&gate), crgs::YearMonth::new(2025, 1).unwrap()).await, Err(Error::InvalidInput));
-    assert_eq!(m.admit_test(&login.authentication, &policy("foreign"), &[], lease()).await, Err(Error::Identity));
-    m.admit_test(&login.authentication, &raw, std::slice::from_ref(&gate), lease()).await.unwrap();
-    assert_eq!(m.member(&login.authentication).await.unwrap().unwrap().id.as_bytes(), SUBJECT.as_bytes());
-    assert_eq!(m.reserve_handle(&login.authentication, HANDLE, &[]).await, Err(Error::Transition));
-    assert_eq!(m.lapse_test(&login.authentication, &raw, std::slice::from_ref(&gate)).await, Err(Error::Policy));
+    assert_eq!(
+        m.admit_test(
+            &login.authentication,
+            &raw,
+            std::slice::from_ref(&gate),
+            crgs::YearMonth::new(2025, 1).unwrap()
+        )
+        .await,
+        Err(Error::InvalidInput)
+    );
+    assert_eq!(
+        m.admit_test(&login.authentication, &policy("foreign"), &[], lease())
+            .await,
+        Err(Error::Identity)
+    );
+    m.admit_test(
+        &login.authentication,
+        &raw,
+        std::slice::from_ref(&gate),
+        lease(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        m.member(&login.authentication)
+            .await
+            .unwrap()
+            .unwrap()
+            .id
+            .as_bytes(),
+        SUBJECT.as_bytes()
+    );
+    assert_eq!(
+        m.reserve_handle(&login.authentication, HANDLE, &[]).await,
+        Err(Error::Transition)
+    );
+    assert_eq!(
+        m.lapse_test(&login.authentication, &raw, std::slice::from_ref(&gate))
+            .await,
+        Err(Error::Policy)
+    );
     m.storage.signal_revocation(SUBJECT).await.unwrap();
     assert!(m.membership(SUBJECT, now() as u64).await.is_err());
     let mut authority = verified_policy(&raw, now()).await;
     authority.bump_epoch().await.unwrap();
-    authority.publish(cplc::SnapshotKind::Settings, now() as u64).await.unwrap();
-    authority.publish(cplc::SnapshotKind::RevocationList, now() as u64).await.unwrap();
+    authority
+        .publish(cplc::SnapshotKind::Settings, now() as u64)
+        .await
+        .unwrap();
+    authority
+        .publish(cplc::SnapshotKind::RevocationList, now() as u64)
+        .await
+        .unwrap();
     for event in m.revocations(10).await.unwrap() {
         m.acknowledge_revocation(&event).await.unwrap();
     }
@@ -651,7 +722,16 @@ async fn invalid_configuration_registration_and_worker_failure_are_refused() {
     }
     let mut mismatched = config();
     mismatched.rp_id = "foreign.example.org".into();
-    assert!(super::Membership::new(&db, crate::MemoryStorage::new("bounds").unwrap(), mismatched, Verify, Clock::new()).is_err());
+    assert!(
+        super::Membership::new(
+            &db,
+            crate::MemoryStorage::new("bounds").unwrap(),
+            mismatched,
+            Verify,
+            Clock::new()
+        )
+        .is_err()
+    );
     let m = facade(&db, "bounds", Clock::new());
     assert!(matches!(
         m.begin_registration(Uuid::nil(), SUBJECT).await,
@@ -697,21 +777,55 @@ async fn live_owner_receipts_refuse_foreign_scopes_and_stale_register_rows() {
         if order.order.community == "owner-boundaries" {
             order.order.subject = "another-subject".into();
         }
-        assert_eq!(m.self_ban(&login.authentication, &order).await, Err(Error::Identity));
+        assert_eq!(
+            m.self_ban(&login.authentication, &order).await,
+            Err(Error::Identity)
+        );
     }
     assert!(m.revocations(10).await.unwrap().is_empty());
     let raw = policy("owner-boundaries");
-    m.admit_test(&login.authentication, &raw, &[test_gate("owner-boundaries", SUBJECT)], lease()).await.unwrap();
-    let first_key = ed25519_dalek::SigningKey::from_bytes(&[61; 32]).verifying_key().to_bytes();
-    let second_key = ed25519_dalek::SigningKey::from_bytes(&[62; 32]).verifying_key().to_bytes();
+    m.admit_test(
+        &login.authentication,
+        &raw,
+        &[test_gate("owner-boundaries", SUBJECT)],
+        lease(),
+    )
+    .await
+    .unwrap();
+    let first_key = ed25519_dalek::SigningKey::from_bytes(&[61; 32])
+        .verifying_key()
+        .to_bytes();
+    let second_key = ed25519_dalek::SigningKey::from_bytes(&[62; 32])
+        .verifying_key()
+        .to_bytes();
     // Import a genuine historical multi-key binding through the actual owner store.
-    m.storage.set_device_keys(SUBJECT, login.authentication.credential_id().as_ref(), &[first_key, second_key]).await.unwrap();
-    assert_eq!(m.authorize_device_key(&login.authentication, first_key).await, Err(Error::Identity));
+    m.storage
+        .set_device_keys(
+            SUBJECT,
+            login.authentication.credential_id().as_ref(),
+            &[first_key, second_key],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        m.authorize_device_key(&login.authentication, first_key)
+            .await,
+        Err(Error::Identity)
+    );
     // The register has actually released the handle, while Enrol still reflects admission.
     let late = "2030-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
     m.register.release_expired(late, 10).await.unwrap();
     assert!(m.membership(SUBJECT, now() as u64).await.is_err());
-    assert_eq!(m.admit_test(&login.authentication, &raw, &[test_gate("owner-boundaries", SUBJECT)], lease()).await, Err(Error::Register));
+    assert_eq!(
+        m.admit_test(
+            &login.authentication,
+            &raw,
+            &[test_gate("owner-boundaries", SUBJECT)],
+            lease()
+        )
+        .await,
+        Err(Error::Register)
+    );
     assert!(m.revocations(10).await.unwrap().is_empty());
 }
 
@@ -721,13 +835,28 @@ async fn temporary_legal_restriction_lapses_without_terminating_the_member() {
     let (_dir, db) = temporary().await;
     let m = facade(&db, "temporary-order", Clock::new());
     let (_, login) = pending(&m, "temporary-order").await;
-    m.admit_test(&login.authentication, &policy("temporary-order"), &[test_gate("temporary-order", SUBJECT)], lease()).await.unwrap();
+    m.admit_test(
+        &login.authentication,
+        &policy("temporary-order"),
+        &[test_gate("temporary-order", SUBJECT)],
+        lease(),
+    )
+    .await
+    .unwrap();
     let mut signed = ban("temporary-order");
-    signed.order.kind = clbs::OrderKind::Legal { authority: "fixture-authority".into() };
+    signed.order.kind = clbs::OrderKind::Legal {
+        authority: "fixture-authority".into(),
+    };
     signed.order.period.ends_at = Some(now() + 3600);
-    signed.proof = ed25519_dalek::SigningKey::from_bytes(&[7; 32]).sign(&signed.order.signing_payload().unwrap()).to_bytes().to_vec();
+    signed.proof = ed25519_dalek::SigningKey::from_bytes(&[7; 32])
+        .sign(&signed.order.signing_payload().unwrap())
+        .to_bytes()
+        .to_vec();
     m.legal.record_legal(&signed).await.unwrap();
-    assert_eq!(m.enrolment_state(USER).await.unwrap().state(), State::Lapsed);
+    assert_eq!(
+        m.enrolment_state(USER).await.unwrap().state(),
+        State::Lapsed
+    );
     assert!(m.resume(&login.authentication).await.is_err());
     assert_eq!(m.revocations(10).await.unwrap().len(), 1);
 }
@@ -738,14 +867,24 @@ async fn raw_key_removal_cannot_leave_membership_issuance_authority() {
     let (_dir, db) = temporary().await;
     let m = facade(&db, "issuance-reconcile", Clock::new());
     let (_, login) = pending(&m, "issuance-reconcile").await;
-    m.admit_test(&login.authentication, &policy("issuance-reconcile"), &[test_gate("issuance-reconcile", SUBJECT)], lease()).await.unwrap();
+    m.admit_test(
+        &login.authentication,
+        &policy("issuance-reconcile"),
+        &[test_gate("issuance-reconcile", SUBJECT)],
+        lease(),
+    )
+    .await
+    .unwrap();
     let keys = m.passkeys.clone();
     let id = login.authentication.credential_id().clone();
     blocking(move || keys.revoke(USER, &id)).await.unwrap();
     assert!(m.membership(SUBJECT, now() as u64).await.is_err());
     let released = m.enrolment_state(USER).await.unwrap();
     assert_eq!(released.state(), State::Released);
-    assert_eq!(m.release_if_lost(released.clone(), now()).await.unwrap(), released);
+    assert_eq!(
+        m.release_if_lost(released.clone(), now()).await.unwrap(),
+        released
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -756,15 +895,38 @@ async fn fresh_policy_cannot_renew_a_lazily_released_handle() {
     let m = facade(&db, "lazy-release", clock.clone());
     let (_, login) = pending(&m, "lazy-release").await;
     let raw = policy("lazy-release");
-    m.admit_test(&login.authentication, &raw, &[test_gate("lazy-release", SUBJECT)], lease()).await.unwrap();
-    let later = "2030-01-01T12:00:00Z".parse::<DateTime<Utc>>().unwrap().timestamp();
+    m.admit_test(
+        &login.authentication,
+        &raw,
+        &[test_gate("lazy-release", SUBJECT)],
+        lease(),
+    )
+    .await
+    .unwrap();
+    let later = "2030-01-01T12:00:00Z"
+        .parse::<DateTime<Utc>>()
+        .unwrap()
+        .timestamp();
     clock.set(later);
     let mut policy = verified_policy(&raw, later).await;
     let snapshot = policy.verified_settings(later as u64).await.unwrap();
     let mut gate = test_gate("lazy-release", SUBJECT);
     gate.valid_until = later + 3600;
     let gates = checked(&snapshot, SUBJECT, &[gate], later).await;
-    assert_eq!(m.admit(&login.authentication, &policy, &snapshot, &gates, crgs::YearMonth::new(2031, 1).unwrap()).await, Err(Error::Transition));
+    assert_eq!(
+        m.admit(
+            &login.authentication,
+            &policy,
+            &snapshot,
+            &gates,
+            crgs::YearMonth::new(2031, 1).unwrap()
+        )
+        .await,
+        Err(Error::Transition)
+    );
     assert!(m.membership(SUBJECT, later as u64).await.is_err());
-    assert_eq!(m.enrolment_state(USER).await.unwrap().state(), State::Released);
+    assert_eq!(
+        m.enrolment_state(USER).await.unwrap().state(),
+        State::Released
+    );
 }

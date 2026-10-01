@@ -188,14 +188,15 @@ PRF and vault restoration stay on the device; see ckyh's Keyhole contract.
 
 ## Passkey-bound signing authority
 
-`authorize_device_keys` requires an opaque verified authentication and a current
+`authorize_device_key` requires an opaque verified authentication and a current
 member session at the service boundary. Under the member serialization lease it
-rechecks the exact credential, legal restrictions and lifecycle, then replaces
-that credential's bounded public Ed25519 key set. The service must expose this as
+rechecks the exact credential, legal restrictions and lifecycle, then binds
+that credential's single actual lineage device Ed25519 key. The same key is
+idempotent; a different key cannot replace it. The service must expose this as
 an explicit authenticated device operation; raw credential-request keys are not
 an instruction to authorize themselves.
 
-A durable revocation event precedes every replacement. The door must flush that
+A durable revocation event precedes the initial binding. The door must flush that
 event and publish the new epoch before returning success. `current_device_keys`
 filters each binding against the current unrevoked credentials on every read, so
 passkey removal refuses further authority immediately, even before storage cleanup

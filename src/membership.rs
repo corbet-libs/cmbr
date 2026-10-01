@@ -701,19 +701,24 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
         .await
     }
 
-    /// Authorize the exact public signing keys selected by this live passkey.
+    /// Bind the actual lineage device key to this exact live passkey.
     /// The service must require a current member session and explicit device intent.
-    /// Keys supplied with a credential request never implicitly call this method.
-    pub async fn authorize_device_keys(
+    /// Credential requests never implicitly authorize keys. Repeated binding of
+    /// the same deterministic device is idempotent; key substitution is refused.
+    pub async fn authorize_device_key(
         &self,
         auth: &Authentication,
-        keys: &[[u8; 32]],
+        key: [u8; 32],
     ) -> Result<()> {
         let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
         let row = self.authenticated(auth, self.now()?).await?;
-        // Conservatively invalidate previous credentials before changing bindings.
+        let current = self.storage.device_keys(row.subject()).await?;
+        let current: Vec<_> = current.iter().filter(|binding| binding.credential == auth.credential_id().as_ref()).collect();
+        if !current.is_empty() {
+            return if current.len() == 1 && current[0].key == key { Ok(()) } else { Err(Error::Identity) };
+        }
         self.storage.signal_revocation(row.subject()).await?;
-        self.storage.set_device_keys(row.subject(), auth.credential_id().as_ref(), keys).await
+        self.storage.set_device_keys(row.subject(), auth.credential_id().as_ref(), &[key]).await
     }
 
     /// Current server authority for pairing and credential composition. A removed

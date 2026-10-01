@@ -61,7 +61,11 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
     let response = token
         .perform_register(
             cpky::Url::parse(ORIGIN).unwrap(),
-            challenge.public_key,
+            {
+                let mut request = challenge.public_key;
+                request.require_resident_key = false;
+                request
+            },
             300_000,
         )
         .unwrap();
@@ -69,7 +73,7 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
     blocking(move || {
         keys.finish_registration(
             pending.pending,
-            &response,
+            &response.into(),
             cpky::CreationMonth::new(2026, 9).unwrap(),
         )
     })
@@ -204,7 +208,11 @@ async fn revoked_authentication_cannot_change_pins_or_revoke_the_remaining_key()
     let response = token
         .perform_register(
             cpky::Url::parse(ORIGIN).unwrap(),
-            challenge.public_key,
+            {
+                let mut request = challenge.public_key;
+                request.require_resident_key = false;
+                request
+            },
             300000,
         )
         .unwrap();
@@ -212,7 +220,7 @@ async fn revoked_authentication_cannot_change_pins_or_revoke_the_remaining_key()
     let second = blocking(move || {
         keys.finish_registration(
             pending,
-            &response,
+            &response.into(),
             cpky::CreationMonth::new(2026, 9).unwrap(),
         )
     })

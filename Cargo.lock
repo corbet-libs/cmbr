@@ -952,7 +952,7 @@ dependencies = [
 [[package]]
 name = "cnrl"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cnrl?rev=3ca96fbd71f5fd2a3f09b245b3e6a45bea9bd3f4#3ca96fbd71f5fd2a3f09b245b3e6a45bea9bd3f4"
+source = "git+https://github.com/corbet-foss/cnrl?rev=11dd4b47f683b7de93951ad07a54e95e5b30ff9f#11dd4b47f683b7de93951ad07a54e95e5b30ff9f"
 dependencies = [
  "chrono",
  "clbs",
@@ -1070,7 +1070,7 @@ dependencies = [
 [[package]]
 name = "cpky"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cpky?rev=44dc385a6158e056f995f75cae3009eb20a73ebd#44dc385a6158e056f995f75cae3009eb20a73ebd"
+source = "git+https://github.com/corbet-foss/cpky?rev=5883d21b27d0cc5287d50e983505c91008b3b927#5883d21b27d0cc5287d50e983505c91008b3b927"
 dependencies = [
  "crlt",
  "serde",

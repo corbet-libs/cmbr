@@ -229,6 +229,7 @@ async fn imported_enrolment_without_register_row_cannot_issue_membership() {
         )
         .await
         .unwrap();
+    assert_eq!(m.enrolment_state(USER).await.unwrap(), admitted);
     assert_eq!(m.resume(&login.authentication).await.unwrap(), admitted);
     assert!(m.member(&login.authentication).await.unwrap().is_none());
     assert!(m.membership(SUBJECT, now() as u64).await.is_err());

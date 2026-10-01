@@ -168,6 +168,34 @@ class ExceptionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.check([line, first, self.branch])
 
+    def proof_dependency(self):
+        identity = {'version': '0.0.0', 'source': 'git+https://github.com/corbet-foss/proof?branch=main#' + 'a' * 40}
+        text = '[[package]]\nname = "proof"\nversion = "0.0.0"\nsource = "' + identity['source'] + '"\n'
+        (self.root / 'Cargo.lock').write_text(text)
+        return self.branch | {'evidence_packages': {'proof': identity}}, text
+
+    def test_exact_proof_dependency_ignores_unrelated_packages(self):
+        entry, text = self.proof_dependency()
+        self.check([entry])
+        (self.root / 'Cargo.lock').write_text(text + '\n[[package]]\nname = "other"\nversion = "2"\n')
+        self.check([entry])
+        (self.root / 'Cargo.lock').write_text(text.replace('a' * 40, 'b' * 40))
+        with self.assertRaises(ValueError):
+            self.check([entry])
+
+    def test_proof_dependency_refuses_missing_duplicate_or_wrong_version(self):
+        entry, text = self.proof_dependency()
+        for changed in ('[[package]]\nname="other"\n', text + text, text.replace('0.0.0', '1.0.0')):
+            (self.root / 'Cargo.lock').write_text(changed)
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                self.check([entry])
+
+    def test_proof_dependency_refuses_weak_or_malformed_identity(self):
+        entry, _ = self.proof_dependency()
+        for value in ([], {'proof': {}}, {'proof': {'version': '0.0.0', 'source': 'branch=main'}}, {'proof': {'version': True, 'source': 'a' * 40}}):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.check([entry | {'evidence_packages': value}])
+
 
 if __name__ == '__main__':
     with contextlib.redirect_stdout(io.StringIO()):

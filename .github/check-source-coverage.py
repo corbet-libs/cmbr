@@ -2,6 +2,7 @@
 """Require all emitted source lines and branches from the same LLVM execution."""
 import json
 import hashlib
+import tomllib
 import re
 from collections import Counter
 import sys
@@ -36,6 +37,21 @@ def check(lcov, raw_json, root, annotated, target='native'):
             dependency.relative_to(root)
             if hashlib.sha256(dependency.read_bytes()).hexdigest() != digest:
                 raise ValueError('Exclusion evidence changed; review it')
+        packages = entry.get('evidence_packages', {})
+        if not isinstance(packages, dict):
+            raise ValueError('Invalid proof dependency inventory')
+        if packages:
+            locked = tomllib.loads((root / 'Cargo.lock').read_text())['package']
+            for name, identity in packages.items():
+                if (not isinstance(name, str) or not name
+                        or not isinstance(identity, dict)
+                        or set(identity) != {'version', 'source'}
+                        or any(not isinstance(value, str) or not value for value in identity.values())
+                        or not re.fullmatch(r'git\+.+#[0-9a-f]{40}', identity['source'])):
+                    raise ValueError('Proof dependency requires an exact locked Git identity')
+                matches = [package for package in locked if package['name'] == name]
+                if len(matches) != 1 or any(matches[0].get(key) != value for key, value in identity.items()):
+                    raise ValueError('Proof dependency changed or is not unique; review it')
         key = (str(relative), line)
         if 'branch' in entry:
             branch = entry['branch']

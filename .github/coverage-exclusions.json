@@ -9,8 +9,13 @@
     "evidence_sources": {
       "src/membership.rs": "6519de77c6c0bc425250553c8d61ce60f0fa10ac4d4c603e12e4cdb9aa33b056",
       "src/membership/tests.rs": "8dd37ab811d9e83ac8b6a56c0a6c39218b238f209a1eaeeaf5d924c14024056e",
-      "tests/membership.rs": "eeb709feaba50b7e8096dfc88d51e09cdfaf1ab949fd9753a4f28c98ec5bb93b",
-      "Cargo.lock": "736926cb501fdce853236e164349cca97e8e258c96dbecd2c8533c92b62b1d0d"
+      "tests/membership.rs": "eeb709feaba50b7e8096dfc88d51e09cdfaf1ab949fd9753a4f28c98ec5bb93b"
+    },
+    "evidence_packages": {
+      "cgts": {
+        "version": "0.0.0",
+        "source": "git+https://github.com/corbet-libs/cgts?branch=main#22c93bfa5e70e3cdce6c064c5ab2666b9f665de5"
+      }
     }
   },
   {
@@ -23,8 +28,13 @@
     "evidence_sources": {
       "src/membership.rs": "6519de77c6c0bc425250553c8d61ce60f0fa10ac4d4c603e12e4cdb9aa33b056",
       "src/membership/tests.rs": "8dd37ab811d9e83ac8b6a56c0a6c39218b238f209a1eaeeaf5d924c14024056e",
-      "tests/membership.rs": "eeb709feaba50b7e8096dfc88d51e09cdfaf1ab949fd9753a4f28c98ec5bb93b",
-      "Cargo.lock": "736926cb501fdce853236e164349cca97e8e258c96dbecd2c8533c92b62b1d0d"
+      "tests/membership.rs": "eeb709feaba50b7e8096dfc88d51e09cdfaf1ab949fd9753a4f28c98ec5bb93b"
+    },
+    "evidence_packages": {
+      "cgts": {
+        "version": "0.0.0",
+        "source": "git+https://github.com/corbet-libs/cgts?branch=main#22c93bfa5e70e3cdce6c064c5ab2666b9f665de5"
+      }
     }
   },
   {
@@ -37,8 +47,13 @@
     "evidence_sources": {
       "src/membership.rs": "6519de77c6c0bc425250553c8d61ce60f0fa10ac4d4c603e12e4cdb9aa33b056",
       "src/membership/tests.rs": "8dd37ab811d9e83ac8b6a56c0a6c39218b238f209a1eaeeaf5d924c14024056e",
-      "tests/membership.rs": "eeb709feaba50b7e8096dfc88d51e09cdfaf1ab949fd9753a4f28c98ec5bb93b",
-      "Cargo.lock": "736926cb501fdce853236e164349cca97e8e258c96dbecd2c8533c92b62b1d0d"
+      "tests/membership.rs": "eeb709feaba50b7e8096dfc88d51e09cdfaf1ab949fd9753a4f28c98ec5bb93b"
+    },
+    "evidence_packages": {
+      "cgts": {
+        "version": "0.0.0",
+        "source": "git+https://github.com/corbet-libs/cgts?branch=main#22c93bfa5e70e3cdce6c064c5ab2666b9f665de5"
+      }
     }
   },
   {
@@ -51,8 +66,13 @@
     "evidence_sources": {
       "src/membership.rs": "6519de77c6c0bc425250553c8d61ce60f0fa10ac4d4c603e12e4cdb9aa33b056",
       "src/membership/tests.rs": "8dd37ab811d9e83ac8b6a56c0a6c39218b238f209a1eaeeaf5d924c14024056e",
-      "tests/membership.rs": "eeb709feaba50b7e8096dfc88d51e09cdfaf1ab949fd9753a4f28c98ec5bb93b",
-      "Cargo.lock": "736926cb501fdce853236e164349cca97e8e258c96dbecd2c8533c92b62b1d0d"
+      "tests/membership.rs": "eeb709feaba50b7e8096dfc88d51e09cdfaf1ab949fd9753a4f28c98ec5bb93b"
+    },
+    "evidence_packages": {
+      "cgts": {
+        "version": "0.0.0",
+        "source": "git+https://github.com/corbet-libs/cgts?branch=main#22c93bfa5e70e3cdce6c064c5ab2666b9f665de5"
+      }
     }
   }
 ]

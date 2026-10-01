@@ -51,9 +51,12 @@ No fake spend or accepting adapter substitutes for the accounting owner.
 Only the four source counters for the inaccessible `Pins::change` continuation
 are proposed for exclusion. Every line/branch inventory is still reconciled
 across the same-execution JSON, LCOV and annotated reports. Entries bind the
-complete membership implementation, its actual integration tests and resolved
-Cargo.lock. A moved, changed, missing or executed line, or any changed supporting
-source/dependency snapshot, fails the gate and requires renewed review. No branch
+complete membership implementation and its actual integration tests, plus the
+exact unique cgts version/full Git source in the resolved Cargo.lock. The proof
+uses only that owner: its unconditional refusal cannot become successful through
+a transitive dependency. A moved, changed, missing or executed line, or changed
+supporting source/owner revision, fails the gate and requires renewed review.
+Unrelated dependency updates still run the complete real test/coverage suite. No branch
 or whole function is excluded. The owner source SHA-256 is `3d45c3322a344db24b3dae20de2197cf1b2c4c6b6db7c86f90270c0e8f1cad87`.
 
 Independent review is required. This exception does not satisfy the blocked

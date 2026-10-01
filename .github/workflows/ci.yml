@@ -2,8 +2,9 @@ name: ci
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci
+  cancel-in-progress: false
+  queue: max
 jobs:
   resolve:
     runs-on: ubuntu-latest
@@ -140,7 +141,7 @@ jobs:
 'on':
   push:
     branches:
-    - '**'
+    - main
     paths-ignore:
     - '**.md'
     - LICENSE

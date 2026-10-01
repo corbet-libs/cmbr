@@ -9,6 +9,7 @@ use webauthn_authenticator_rs::{AuthenticatorBackend, softtoken::SoftToken};
 async fn complete_membership_round_trip() {
     let (_dir, db) = temporary().await;
     let facade = facade(&db, "a", Clock::new());
+    assert_eq!(facade.community(), "a");
     let (mut device, auth) = pending(&facade, "a").await;
     let proof = test_gate("a", SUBJECT);
     assert_eq!(

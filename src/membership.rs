@@ -121,6 +121,11 @@ impl<S, L, C> Clone for Membership<S, L, C> {
 impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static>
     Membership<S, L, C>
 {
+    /// Immutable community of every composed membership store and passkey ceremony.
+    pub fn community(&self) -> &str {
+        self.storage.community()
+    }
+
     /// Durable revocation events for cmty to forward to cplc before issuance.
     pub async fn revocations(&self, limit: usize) -> Result<Vec<crate::Revocation>> {
         self.storage.revocations(limit).await

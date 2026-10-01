@@ -185,3 +185,25 @@ responses directly into ckyh's guarded wire types: parsing into upstream types
 first would discard the extension before it can be refused. Both registration
 (including additional keys) and both login paths use those same guarded types.
 PRF and vault restoration stay on the device; see ckyh's Keyhole contract.
+
+## Passkey-bound signing authority
+
+`authorize_device_keys` requires an opaque verified authentication and a current
+member session at the service boundary. Under the member serialization lease it
+rechecks the exact credential, legal restrictions and lifecycle, then replaces
+that credential's bounded public Ed25519 key set. The service must expose this as
+an explicit authenticated device operation; raw credential-request keys are not
+an instruction to authorize themselves.
+
+A durable revocation event precedes every replacement. The door must flush that
+event and publish the new epoch before returning success. `current_device_keys`
+filters each binding against the current unrevoked credentials on every read, so
+passkey removal refuses further authority immediately, even before storage cleanup
+or device synchronization. It supplies current server authority to the pairing
+adapter; that adapter must additionally verify the exact ckmg root, epoch, lineage
+and pairing intent. No server operation handles a root secret or PRF.
+
+Append `DEVICE_KEYS_SCHEMA` after the application's entire previous migration
+history. The six existing `SCHEMAS` entries, including the historical `cpky` name,
+are unchanged. Bindings persist only public keys and the already-held local
+credential/pseudonym relationship, never names or activity timestamps.

@@ -13,10 +13,12 @@ pub use membership::{
     Config, Lobby, Login, Membership, PendingAdditionalRegistration, PendingLogin,
     PendingRegistration, Warning,
 };
-pub use storage::{LibsqlStorage, MemoryStorage, Revocation, SCHEMA, Storage};
+pub use storage::{
+    DEVICE_KEYS_SCHEMA, DeviceKeyBinding, LibsqlStorage, MemoryStorage, Revocation, SCHEMA, Storage,
+};
 // Export protocol values only; callers cannot reach leaf writers through cmbr.
-pub use cnrl::{Record, State};
 pub use ckyh::{Authentication, Uuid};
+pub use cnrl::{Record, State};
 pub use cpns::server::Pin;
 pub use crgs::{Handle, Member, YearMonth};
 

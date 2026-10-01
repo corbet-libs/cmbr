@@ -399,8 +399,9 @@ async fn clock_and_storage_errors_leave_no_operation_lock() {
         .enumerate()
         .map(|(i, (name, sql))| crlt::Migration::new(i as u32 + 1, name, sql))
         .collect();
+    migrations.push(crlt::Migration::new(7, "cmbr-device-keys", crate::DEVICE_KEYS_SCHEMA));
     migrations.push(crlt::Migration::new(
-        7,
+        8,
         "break-probation",
         "DROP TABLE cmbr_probation;",
     ));
@@ -416,7 +417,7 @@ async fn clock_and_storage_errors_leave_no_operation_lock() {
         Err(Error::Unavailable)
     );
     assert!(m.resume(&login.authentication).await.is_ok());
-    migrations.push(crlt::Migration::new(8,"restore-probation","CREATE TABLE cmbr_probation (community_id TEXT NOT NULL, subject TEXT NOT NULL, probation_until INTEGER, PRIMARY KEY (community_id, subject)) WITHOUT ROWID;"));
+    migrations.push(crlt::Migration::new(9,"restore-probation","CREATE TABLE cmbr_probation (community_id TEXT NOT NULL, subject TEXT NOT NULL, probation_until INTEGER, PRIMARY KEY (community_id, subject)) WITHOUT ROWID;"));
     db.migrate(&migrations).await.unwrap();
     assert!(
         m.admit_test(

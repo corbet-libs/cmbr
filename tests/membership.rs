@@ -354,6 +354,11 @@ async fn additional_device_preserves_membership_and_survives_original_removal() 
         )
         .await
         .unwrap();
+    let key_one = ed25519_dalek::SigningKey::from_bytes(&[31; 32]).verifying_key().to_bytes();
+    let key_two = ed25519_dalek::SigningKey::from_bytes(&[32; 32]).verifying_key().to_bytes();
+    assert!(m.current_device_keys(&first.authentication).await.unwrap().is_empty());
+    m.authorize_device_keys(&first.authentication, &[key_one]).await.unwrap();
+    assert_eq!(m.current_device_keys(&first.authentication).await.unwrap(), vec![key_one]);
     let (options, state) = m
         .begin_additional_registration(&first.authentication)
         .await
@@ -383,6 +388,10 @@ async fn additional_device_preserves_membership_and_survives_original_removal() 
     assert_eq!(m.resume(&first.authentication).await.unwrap(), admitted);
     let survivor = login(&m, &mut second, USER).await;
     assert_eq!(survivor.enrolment, admitted);
+    m.authorize_device_keys(&survivor.authentication, &[key_two]).await.unwrap();
+    let mut expected = vec![key_one, key_two];
+    expected.sort();
+    assert_eq!(m.current_device_keys(&survivor.authentication).await.unwrap(), expected);
     m.revoke_passkey(
         &survivor.authentication,
         first.authentication.credential_id().clone(),
@@ -390,6 +399,9 @@ async fn additional_device_preserves_membership_and_survives_original_removal() 
     .await
     .unwrap();
     assert!(m.resume(&first.authentication).await.is_err());
+    assert!(m.authorize_device_keys(&first.authentication, &[key_one]).await.is_err());
+    assert!(m.current_device_keys(&first.authentication).await.is_err());
+    assert_eq!(m.current_device_keys(&survivor.authentication).await.unwrap(), vec![key_two]);
     assert!(
         m.begin_additional_registration(&first.authentication)
             .await
@@ -400,8 +412,11 @@ async fn additional_device_preserves_membership_and_survives_original_removal() 
             .await
             .unwrap()
     );
+    assert!(m.authorize_device_keys(&survivor.authentication, &[[0; 32]]).await.is_err());
+    assert_eq!(m.current_device_keys(&survivor.authentication).await.unwrap(), vec![key_two]);
     drop(m);
     let m = facade(&db, "a", Clock::new());
+    assert_eq!(m.current_device_keys(&survivor.authentication).await.unwrap(), vec![key_two]);
     let survivor = login(&m, &mut second, USER).await;
     assert_eq!(survivor.enrolment, admitted);
     assert_eq!(

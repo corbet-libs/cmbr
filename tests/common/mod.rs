@@ -115,7 +115,9 @@ pub async fn open(url: &str, token: &str) -> crlt::Db {
     let mut config = crlt::Config::new(url, token);
     config.max_connections = 4;
     let db = crlt::Db::open(config).await.unwrap();
-    let migrations: Vec<_> = cmbr::SCHEMAS
+    let mut schemas = cmbr::SCHEMAS.to_vec();
+    schemas.push(("cmbr-device-keys", cmbr::DEVICE_KEYS_SCHEMA));
+    let migrations: Vec<_> = schemas
         .iter()
         .enumerate()
         .map(|(i, (name, sql))| crlt::Migration::new(i as u32 + 1, name, sql))

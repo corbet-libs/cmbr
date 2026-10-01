@@ -701,6 +701,37 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
         .await
     }
 
+    /// Authorize the exact public signing keys selected by this live passkey.
+    /// The service must require a current member session and explicit device intent.
+    /// Keys supplied with a credential request never implicitly call this method.
+    pub async fn authorize_device_keys(
+        &self,
+        auth: &Authentication,
+        keys: &[[u8; 32]],
+    ) -> Result<()> {
+        let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        let row = self.authenticated(auth, self.now()?).await?;
+        // Conservatively invalidate previous credentials before changing bindings.
+        self.storage.signal_revocation(row.subject()).await?;
+        self.storage.set_device_keys(row.subject(), auth.credential_id().as_ref(), keys).await
+    }
+
+    /// Current server authority for pairing and credential composition. A removed
+    /// passkey contributes no key even if its historical binding remains in storage.
+    pub async fn current_device_keys(&self, auth: &Authentication) -> Result<Vec<[u8; 32]>> {
+        let _guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        let row = self.authenticated(auth, self.now()?).await?;
+        self.live_device_keys(&row).await
+    }
+
+    async fn live_device_keys(&self, row: &Record) -> Result<Vec<[u8; 32]>> {
+        let credentials = self.credentials(row.user()).await?;
+        let bindings = self.storage.device_keys(row.subject()).await?;
+        Ok(bindings.into_iter().filter(|binding| credentials.iter().any(|credential| {
+            !credential.is_revoked() && credential.credential_id().as_ref() == binding.credential
+        })).map(|binding| binding.key).collect::<std::collections::BTreeSet<_>>().into_iter().collect())
+    }
+
     /// Revoke one owned credential. Losing the last live credential releases the
     /// lifecycle immediately; crgs retains its existing coarse handle deadline.
     pub async fn revoke_passkey(

@@ -16,3 +16,18 @@ duplicate, empty or malformed evidence cannot pass. Raw JSON totals remain
 as diagnostic evidence for generic instantiations; source coverage does not
 claim every generic instantiation is covered. Both artifacts are retained on
 failure. No production source exclusions are currently approved.
+
+The registration facade delegates receipt community/member validation to
+`cnrl::Enrol::apply(Event::PasskeyRegistered)`, which checks both against the
+immutable enrolment row before committing. Its redundant member-only check has
+been removed; no receipt can bypass the owning boundary.
+
+Both detached membership mutations use one private completion helper. Its real
+Tokio task-unwind test and the actual cancelled-reservation integration test
+exercise failure mapping and completion after the request is dropped.
+
+The encoded PIN-change verifier currently always refuses: `cgts::pins::SpentChange`
+has no public constructor, and `verify_encoded_pin_change` returns
+`ExtensionsUnavailable` after validating the canonical change binding. The
+success continuation is not claimed tested or enabled. A real owner acceptance
+capability remains necessary before this workflow can complete.

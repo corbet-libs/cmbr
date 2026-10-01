@@ -805,7 +805,7 @@ dependencies = [
 [[package]]
 name = "cgts"
 version = "0.0.0"
-source = "git+https://github.com/corbet-libs/cgts?branch=main#bed21882ba17f544a3a4d0b9872f0126ffabbb4c"
+source = "git+https://github.com/corbet-libs/cgts?branch=main#523c96986defb8fe05952e79e81f58829bcb73be"
 dependencies = [
  "cblc",
  "cgrd",
@@ -985,7 +985,7 @@ dependencies = [
 [[package]]
 name = "cnrl"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/cnrl?branch=main#76e02e020c280f5ba71ab216284c41d3ee8ce20f"
+source = "git+https://github.com/corbet-foss/cnrl?branch=main#bd9583956c60a0aadd84b3ba642fae37fbe882e5"
 dependencies = [
  "chrono",
  "ckyh",
@@ -1296,7 +1296,7 @@ dependencies = [
 [[package]]
 name = "crlt"
 version = "0.0.0"
-source = "git+https://github.com/corbet-foss/crlt?branch=main#8677ba18fc156890b06ee6264be279c401cf3c5b"
+source = "git+https://github.com/corbet-foss/crlt?branch=main#ad4aaaa8fee61dea4858b3ed6be496b67db7f856"
 dependencies = [
  "deadpool",
  "libsql",

@@ -85,6 +85,21 @@ async fn unproven_pin_spends_cannot_change_state_even_after_restart() {
         m.pin(&auth.authentication, "restricted", &original).await,
         Err(Error::Pin)
     );
+    let overflow = cmbr::Pin {
+        revision: u64::MAX,
+        ..pin
+    };
+    assert_eq!(
+        m.change_pin(
+            &auth.authentication,
+            "restricted",
+            overflow,
+            &replacement,
+            b"unspent"
+        )
+        .await,
+        Err(Error::Pin)
+    );
     for evidence in [b"unspent".as_slice(), b"signed-acceptance", b"replay"] {
         assert!(matches!(
             m.change_pin(
@@ -411,6 +426,18 @@ async fn additional_device_preserves_membership_and_survives_original_removal() 
     assert_eq!(m.resume(&first.authentication).await.unwrap(), admitted);
     let survivor = login(&m, &mut second, USER).await;
     assert_eq!(survivor.enrolment, admitted);
+    let mut live_policy = verified_policy(&policy("a"), now()).await;
+    let snapshot = live_policy.verified_settings(now() as u64).await.unwrap();
+    let gates = checked(&snapshot, SUBJECT, &[test_gate("a", SUBJECT)], now()).await;
+    let lobby = m
+        .lobby(&survivor.authentication, &live_policy, &snapshot, &gates)
+        .await
+        .unwrap();
+    assert!(
+        !lobby
+            .warnings
+            .contains(&cmbr::Warning::AddSecondDeviceOrSyncedPasskey)
+    );
     assert!(
         !m.session_is_active(&first.authentication, added.credential_id())
             .await

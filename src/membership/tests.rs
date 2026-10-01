@@ -145,6 +145,97 @@ async fn pending_registrations_cannot_finish_after_registration_or_release() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn revoked_interrupted_first_registration_cannot_finish_another_ceremony() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "interrupted-loss", Clock::new());
+    let (first, first_state) = m.begin_registration(USER, SUBJECT).await.unwrap();
+    let (second, second_state) = m.begin_registration(USER, SUBJECT).await.unwrap();
+    let keys = m.passkeys.clone();
+    let response = registration_reply(first);
+    blocking(move || {
+        let receipt = keys.finish_registration(
+            first_state.pending,
+            &response,
+            ckyh::CreationMonth::new(2026, 9).unwrap(),
+        )?;
+        keys.revoke(USER, receipt.credential_id())
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        m.enrol_store.load(USER).await.unwrap().unwrap().state(),
+        State::Started
+    );
+    assert!(matches!(
+        m.finish_registration(second_state, registration_reply(second))
+            .await,
+        Err(Error::Transition)
+    ));
+    assert_eq!(m.credentials(USER).await.unwrap().len(), 1);
+    assert!(m.credentials(USER).await.unwrap()[0].is_revoked());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn authenticated_policy_cannot_admit_with_invalid_membership_durations() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "policy-durations", Clock::new());
+    let (_, login) = pending(&m, "policy-durations").await;
+    let mut raw = policy("policy-durations");
+    raw.content.insert(crbk::PROBATION_DAYS.into(), 0.into());
+    let mut policy = verified_policy(&raw, now()).await;
+    let snapshot = policy.verified_settings(now() as u64).await.unwrap();
+    let gates = checked(
+        &snapshot,
+        SUBJECT,
+        &[test_gate("policy-durations", SUBJECT)],
+        now(),
+    )
+    .await;
+    assert_eq!(
+        m.admit(&login.authentication, &policy, &snapshot, &gates, lease())
+            .await,
+        Err(Error::Policy)
+    );
+    assert!(
+        m.register
+            .member(&login.enrolment.member_id())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(m.storage.probation(SUBJECT).await.unwrap().is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn imported_enrolment_without_register_row_cannot_issue_membership() {
+    use cplc::MembershipSource;
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "missing-register", Clock::new());
+    let (_, login) = pending(&m, "missing-register").await;
+    let admitted = m
+        .admit_test(
+            &login.authentication,
+            &policy("missing-register"),
+            &[test_gate("missing-register", SUBJECT)],
+            lease(),
+        )
+        .await
+        .unwrap();
+    db.community("missing-register")
+        .unwrap()
+        .execute(
+            "DELETE FROM crgs_members WHERE member_id = ?1",
+            crlt::params![SUBJECT.as_bytes().to_vec()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(m.resume(&login.authentication).await.unwrap(), admitted);
+    assert!(m.member(&login.authentication).await.unwrap().is_none());
+    assert!(m.membership(SUBJECT, now() as u64).await.is_err());
+    assert!(m.revocations(10).await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn lost_revocation_completion_is_reconciled_from_actual_keyhole_state() {
     let (_dir, db) = temporary().await;
     let m = facade(&db, "revocation-reconcile", Clock::new());
@@ -493,6 +584,10 @@ async fn stale_verified_inputs_and_unbounded_leases_cannot_admit() {
         .publish(cplc::SnapshotKind::Settings, now() as u64)
         .await
         .unwrap();
+    assert!(matches!(
+        m.lobby(&login.authentication, &policy, &old, &gates).await,
+        Err(Error::Policy)
+    ));
     assert_eq!(
         m.admit(&login.authentication, &policy, &old, &gates, lease())
             .await,
@@ -743,6 +838,10 @@ async fn invalid_configuration_registration_and_worker_failure_are_refused() {
     ));
     assert_eq!(
         blocking::<()>(|| panic!("synthetic worker failure")).await,
+        Err(Error::Unavailable)
+    );
+    assert_eq!(
+        super::completing::<()>(async { panic!("task unwind") }).await,
         Err(Error::Unavailable)
     );
     assert_eq!(

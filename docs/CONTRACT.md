@@ -21,7 +21,7 @@ Every authenticated operation checks the exact credential ID carried by cpky's
 opaque Authentication against its current unrevoked record. Supplying another
 credential ID cannot rescue a session from a revoked passkey. Revoking the last
 passkey permanently releases the lifecycle; it does not erase a retained handle.
-Account-first login delegates verification/counters to cpky and records no login
+Credential-first and discoverable login delegate verification/counters to cpky and records no login
 time. UUIDs and pseudonyms are service-authenticated community-local bindings.
 
 ## No return and lobby
@@ -166,3 +166,22 @@ the pseudonym, handle, lease, pins and probation. No manual approval is involved
 Revocation invalidates sessions of that key immediately. A remaining passkey keeps
 the same membership usable. Losing or removing every passkey releases it
 permanently: no recovery, and NO RETURN under a fresh registration identifier.
+
+## Discoverable sign-in and Keyhole
+
+`begin_discoverable_login()` needs no member UUID or credential ID. It returns
+cpky's options unchanged: a fresh challenge, empty allow-list and required UV.
+`finish_login` consumes either kind of pending login, delegates verification and
+atomic counter/revocation checks to cpky, and returns the existing membership to
+the lobby. It rechecks current lifecycle and exact credential just as for
+credential-first login; it never creates a member, extends a lease, resets
+probation or records a login date. The user handle is not authority by itself.
+The service bounds, throttles, expires and binds pending ceremonies to clients.
+
+Creation now requests resident credentials. All server options pass unchanged
+through the service to device-side Keyhole; only Keyhole adds its local PRF input.
+It must strip the entire PRF extension before sending a response. Deserialize
+responses directly into cpky's guarded wire types: parsing into upstream types
+first would discard the extension before it can be refused. Both registration
+(including additional keys) and both login paths use those same guarded types.
+PRF and vault restoration stay on the device; see cpky's Keyhole contract.

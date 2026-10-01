@@ -16,8 +16,8 @@ cgts = { git = "https://github.com/corbet-libs/cgts", rev = "b1200a82039260e0597
 cgrd = { git = "https://github.com/corbet-foss/cgrd", rev = "ff83c2b3fe786feb9b8c5f459b828ea1db4e6449", default-features = false }
 crlt = { git = "https://github.com/corbet-foss/crlt", rev = "80dc046d6ab53b3ea530c45bf3d7038c8b2c61b2" }
 crgs = { git = "https://github.com/corbet-foss/crgs", rev = "e691f9266401d7af8dc0acfd02ab7553299eeb8a" }
-cpky = { git = "https://github.com/corbet-foss/cpky", rev = "65f93bb78d103d9ee3c25b80ed873130ecf2a6d7" }
-cnrl = { git = "https://github.com/corbet-foss/cnrl", rev = "bf807db153c5513870af873d6da2df832cd41f4d" }
+cpky = { git = "https://github.com/corbet-foss/cpky", rev = "44dc385a6158e056f995f75cae3009eb20a73ebd" }
+cnrl = { git = "https://github.com/corbet-foss/cnrl", rev = "3ca96fbd71f5fd2a3f09b245b3e6a45bea9bd3f4" }
 cpns = { git = "https://github.com/corbet-foss/cpns", rev = "d68a3f3a2df322c513d0e754e452ee02aab7a5b9" }
 clbs = { git = "https://github.com/corbet-foss/clbs", rev = "873f2dd7388c6d5e025a27b4c55447c4b4892a2d" }
 crbk = { git = "https://github.com/corbet-foss/crbk", rev = "954c17762df251c1354bd9303354d82b0a81e487" }
@@ -28,6 +28,8 @@ thiserror = "2"
 tokio = { version = "1", features = ["sync", "rt-multi-thread"] }
 
 [dev-dependencies]
+passkey = "0.4"
+async-trait = "0.1"
 serde_cbor_2 = "0.13"
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

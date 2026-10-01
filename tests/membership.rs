@@ -253,24 +253,45 @@ async fn unverified_registration_and_wrong_instance_do_not_write_passkeys() {
     let (_dir, db) = temporary().await;
     let a = facade(&db, "a", Clock::new());
     let b = facade(&db, "a", Clock::new());
-    let (challenge, pending) = a.begin_registration(USER, SUBJECT).await.unwrap();
+    let (mut challenge, pending) = a.begin_registration(USER, SUBJECT).await.unwrap();
+    challenge
+        .public_key
+        .authenticator_selection
+        .as_mut()
+        .unwrap()
+        .require_resident_key = false;
     let mut device = SoftToken::new(true).unwrap().0;
     let response = device
         .perform_register(
             cpky::Url::parse(ORIGIN).unwrap(),
-            challenge.public_key,
+            {
+                // SoftToken is a legacy non-resident fixture.
+                let mut options = challenge.public_key;
+                options
+                    .authenticator_selection
+                    .as_mut()
+                    .unwrap()
+                    .require_resident_key = false;
+                options
+            },
             300_000,
         )
         .unwrap();
     assert_eq!(
-        b.finish_registration(pending, response).await,
+        b.finish_registration(pending, response.into()).await,
         Err(Error::Passkey)
     );
     assert_eq!(
         a.enrolment_state(USER).await.unwrap().state(),
         State::Started
     );
-    let (challenge, pending) = a.begin_registration(USER, SUBJECT).await.unwrap();
+    let (mut challenge, pending) = a.begin_registration(USER, SUBJECT).await.unwrap();
+    challenge
+        .public_key
+        .authenticator_selection
+        .as_mut()
+        .unwrap()
+        .require_resident_key = false;
     let mut device = SoftToken::new(true).unwrap().0;
     // Let the fixture produce a UV-less registration despite the server's policy.
     let mut options = challenge.public_key;
@@ -282,7 +303,7 @@ async fn unverified_registration_and_wrong_instance_do_not_write_passkeys() {
         .perform_register(cpky::Url::parse(ORIGIN).unwrap(), options, 300_000)
         .unwrap();
     assert_eq!(
-        a.finish_registration(pending, response).await,
+        a.finish_registration(pending, response.into()).await,
         Err(Error::Passkey)
     );
     assert_eq!(
@@ -341,12 +362,21 @@ async fn additional_device_preserves_membership_and_survives_original_removal() 
     let response = second
         .perform_register(
             cpky::Url::parse(ORIGIN).unwrap(),
-            options.public_key,
+            {
+                // SoftToken is a legacy non-resident fixture.
+                let mut options = options.public_key;
+                options
+                    .authenticator_selection
+                    .as_mut()
+                    .unwrap()
+                    .require_resident_key = false;
+                options
+            },
             300_000,
         )
         .unwrap();
     let added = m
-        .finish_additional_registration(&first.authentication, state, response)
+        .finish_additional_registration(&first.authentication, state, response.into())
         .await
         .unwrap();
     assert_eq!(added.member(), USER);
@@ -413,12 +443,21 @@ async fn additional_registration_rejects_substitution_revocation_and_expiry() {
         .0
         .perform_register(
             cpky::Url::parse(ORIGIN).unwrap(),
-            options.public_key,
+            {
+                // SoftToken is a legacy non-resident fixture.
+                let mut options = options.public_key;
+                options
+                    .authenticator_selection
+                    .as_mut()
+                    .unwrap()
+                    .require_resident_key = false;
+                options
+            },
             300_000,
         )
         .unwrap();
     assert!(matches!(
-        m.finish_additional_registration(&other.authentication, state, response)
+        m.finish_additional_registration(&other.authentication, state, response.into())
             .await,
         Err(Error::Identity)
     ));
@@ -438,7 +477,16 @@ async fn additional_registration_rejects_substitution_revocation_and_expiry() {
         .0
         .perform_register(
             cpky::Url::parse(ORIGIN).unwrap(),
-            options.public_key,
+            {
+                // SoftToken is a legacy non-resident fixture.
+                let mut options = options.public_key;
+                options
+                    .authenticator_selection
+                    .as_mut()
+                    .unwrap()
+                    .require_resident_key = false;
+                options
+            },
             300_000,
         )
         .unwrap();
@@ -449,7 +497,7 @@ async fn additional_registration_rejects_substitution_revocation_and_expiry() {
     .await
     .unwrap();
     assert!(
-        m.finish_additional_registration(&other.authentication, state, response)
+        m.finish_additional_registration(&other.authentication, state, response.into())
             .await
             .is_err()
     );
@@ -462,14 +510,23 @@ async fn additional_registration_rejects_substitution_revocation_and_expiry() {
         .0
         .perform_register(
             cpky::Url::parse(ORIGIN).unwrap(),
-            options.public_key,
+            {
+                // SoftToken is a legacy non-resident fixture.
+                let mut options = options.public_key;
+                options
+                    .authenticator_selection
+                    .as_mut()
+                    .unwrap()
+                    .require_resident_key = false;
+                options
+            },
             300_000,
         )
         .unwrap();
 
     clock.set(first.enrolment.expires_at().unwrap());
     assert!(
-        m.finish_additional_registration(&first.authentication, state, response)
+        m.finish_additional_registration(&first.authentication, state, response.into())
             .await
             .is_err()
     );

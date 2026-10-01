@@ -5,6 +5,8 @@ use std::sync::{
     atomic::{AtomicI64, Ordering},
 };
 
+pub mod resident;
+
 use cpky::Uuid;
 use ed25519_dalek::{Signer, SigningKey};
 use webauthn_authenticator_rs::{AuthenticatorBackend, softtoken::SoftToken};
@@ -132,7 +134,13 @@ pub async fn temporary() -> (tempfile::TempDir, crlt::Db) {
 }
 pub async fn register(facade: &Facade, user: Uuid, subject: &str) -> SoftToken {
     let mut device = SoftToken::new(true).unwrap().0;
-    let (challenge, pending) = facade.begin_registration(user, subject).await.unwrap();
+    let (mut challenge, pending) = facade.begin_registration(user, subject).await.unwrap();
+    challenge
+        .public_key
+        .authenticator_selection
+        .as_mut()
+        .unwrap()
+        .require_resident_key = false;
     let response = device
         .perform_register(
             cpky::Url::parse(ORIGIN).unwrap(),
@@ -142,7 +150,7 @@ pub async fn register(facade: &Facade, user: Uuid, subject: &str) -> SoftToken {
         .unwrap();
     assert_eq!(
         facade
-            .finish_registration(pending, response)
+            .finish_registration(pending, response.into())
             .await
             .unwrap()
             .state(),
@@ -170,7 +178,7 @@ pub async fn login(facade: &Facade, device: &mut SoftToken, user: Uuid) -> cmbr:
             300_000,
         )
         .unwrap();
-    facade.finish_login(pending, response).await.unwrap()
+    facade.finish_login(pending, response.into()).await.unwrap()
 }
 
 // Development-only gate: no production provider or enabling feature exists.

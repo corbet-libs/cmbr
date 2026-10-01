@@ -38,8 +38,12 @@ pub struct PendingAdditionalRegistration {
 }
 /// Server-only single-use login state.
 pub struct PendingLogin {
-    user: Uuid,
-    pending: cpky::PendingAuthentication,
+    ceremony: LoginCeremony,
+}
+
+enum LoginCeremony {
+    Credential(cpky::PendingAuthentication),
+    Discoverable(cpky::PendingDiscoverableAuthentication),
 }
 
 /// A successful passkey login always returns to the enrolment lobby.
@@ -290,9 +294,31 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
             let keys = self.passkeys.clone();
             let (challenge, pending) =
                 blocking(move || keys.start_authentication_for(user, &credential_id)).await?;
-            Ok((challenge, PendingLogin { user, pending }))
+            Ok((
+                challenge,
+                PendingLogin {
+                    ceremony: LoginCeremony::Credential(pending),
+                },
+            ))
         }
         .await
+    }
+
+    /// Begin usernameless sign-in when a new device has no stored identifiers.
+    /// Returns cpky's server-built options unchanged; no membership lookup occurs.
+    pub async fn begin_discoverable_login(
+        &self,
+    ) -> Result<(cpky::RequestChallengeResponse, PendingLogin)> {
+        self.now()?;
+        let keys = self.passkeys.clone();
+        let (challenge, pending) =
+            blocking(move || keys.start_discoverable_authentication()).await?;
+        Ok((
+            challenge,
+            PendingLogin {
+                ceremony: LoginCeremony::Discoverable(pending),
+            },
+        ))
     }
 
     /// Commit cpky's counter checks and return authenticated enrolment to the lobby.
@@ -304,11 +330,15 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
     ) -> Result<Login> {
         async {
             let keys = self.passkeys.clone();
-            let authentication =
-                blocking(move || keys.finish_authentication(state.pending, &response)).await?;
-            if authentication.member() != state.user {
-                return Err(Error::Identity);
-            }
+            let authentication = blocking(move || match state.ceremony {
+                LoginCeremony::Credential(pending) => {
+                    keys.finish_authentication(pending, &response)
+                }
+                LoginCeremony::Discoverable(pending) => {
+                    keys.finish_discoverable_authentication(pending, &response)
+                }
+            })
+            .await?;
             let enrolment = self.authenticated(&authentication, self.now()?).await?;
             Ok(Login {
                 authentication,

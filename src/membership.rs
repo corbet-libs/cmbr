@@ -1040,6 +1040,7 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
                     state: row.state().membership(),
                     probation_until,
                     lease_end: lease_end as u64,
+                    authorized_devices: self.live_device_keys(&row).await?,
                 },
                 guard,
             ))

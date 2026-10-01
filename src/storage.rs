@@ -462,8 +462,8 @@ impl Storage for LibsqlStorage {
 // exit and no database Busy marker exists. Service writers share this registry.
 // Leaf row revisions and unique constraints still fence stale/competing writes.
 type MemberLocks = BTreeMap<(String, ckyh::Uuid), Weak<Mutex<()>>>;
+static LOCKS: OnceLock<StdMutex<MemberLocks>> = OnceLock::new();
 pub(crate) async fn member_lock(community: &str, user: ckyh::Uuid) -> OwnedMutexGuard<()> {
-    static LOCKS: OnceLock<StdMutex<MemberLocks>> = OnceLock::new();
     let lock = {
         let mut locks = LOCKS
             .get_or_init(StdMutex::default)

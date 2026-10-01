@@ -413,3 +413,30 @@ async fn malformed_imported_integer_columns_never_create_authority() {
         Err(Error::Unavailable)
     );
 }
+
+#[tokio::test]
+async fn poisoned_member_registry_preserves_the_actual_existing_queue() {
+    let user = ckyh::Uuid::from_u128(89);
+    let held = member_lock("registry-poison", user).await;
+    let registry = LOCKS.get().unwrap();
+    assert!(
+        std::thread::spawn(move || {
+            let _guard = registry.lock().unwrap_or_else(|error| error.into_inner());
+            panic!("interrupted registry access");
+        })
+        .join()
+        .is_err()
+    );
+    let mut waiting = Box::pin(member_lock("registry-poison", user));
+    std::future::poll_fn(|context| {
+        assert!(std::future::Future::poll(waiting.as_mut(), context).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    drop(held);
+    let resumed = tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
+        .await
+        .unwrap();
+    drop(resumed);
+    registry.clear_poison();
+}

@@ -83,6 +83,7 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
     })
     .await
     .unwrap();
+    assert!(matches!(m.begin_registration(USER, SUBJECT).await, Err(Error::Transition)));
     assert_eq!(
         m.enrolment_state(USER).await.unwrap().state(),
         State::PasskeyRegistered
@@ -91,6 +92,68 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
         login(&m, &mut token, USER).await.enrolment.state(),
         State::PasskeyRegistered
     );
+}
+
+fn registration_reply(mut challenge: ckyh::CreationChallengeResponse) -> ckyh::RegisterPublicKeyCredential {
+    use webauthn_authenticator_rs::{AuthenticatorBackend, softtoken::SoftToken};
+    challenge.public_key.authenticator_selection.as_mut().unwrap().require_resident_key = false;
+    SoftToken::new(true).unwrap().0.perform_register(
+        ckyh::Url::parse(ORIGIN).unwrap(), challenge.public_key, 300_000,
+    ).unwrap().into()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pending_registrations_cannot_finish_after_registration_or_release() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "registration-race", Clock::new());
+    let (first, first_state) = m.begin_registration(USER, SUBJECT).await.unwrap();
+    let (second, second_state) = m.begin_registration(USER, SUBJECT).await.unwrap();
+    m.finish_registration(first_state, registration_reply(first)).await.unwrap();
+    assert!(matches!(m.finish_registration(second_state, registration_reply(second)).await, Err(Error::Transition)));
+
+    let m = facade(&db, "release-race", Clock::new());
+    let (challenge, state) = m.begin_registration(USER, SUBJECT).await.unwrap();
+    assert_eq!(m.release(USER).await.unwrap().state(), State::Released);
+    assert!(matches!(m.finish_registration(state, registration_reply(challenge)).await, Err(Error::Transition)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lost_revocation_completion_is_reconciled_from_actual_keyhole_state() {
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "revocation-reconcile", Clock::new());
+    let (_, login) = pending(&m, "revocation-reconcile").await;
+    let keys = m.passkeys.clone();
+    let id = login.authentication.credential_id().clone();
+    blocking(move || keys.revoke(USER, &id)).await.unwrap();
+    assert_eq!(m.enrolment_state(USER).await.unwrap().state(), State::Released);
+    assert_eq!(m.revocations(10).await.unwrap().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn current_membership_requires_publication_before_outbox_acknowledgement() {
+    use cplc::MembershipSource;
+    let (_dir, db) = temporary().await;
+    let m = facade(&db, "publication", Clock::new());
+    let (_, login) = pending(&m, "publication").await;
+    let raw = policy("publication");
+    let gate = test_gate("publication", SUBJECT);
+    assert_eq!(m.admit_test(&login.authentication, &raw, std::slice::from_ref(&gate), crgs::YearMonth::new(2025, 1).unwrap()).await, Err(Error::InvalidInput));
+    assert_eq!(m.admit_test(&login.authentication, &policy("foreign"), &[], lease()).await, Err(Error::Identity));
+    m.admit_test(&login.authentication, &raw, std::slice::from_ref(&gate), lease()).await.unwrap();
+    assert_eq!(m.member(&login.authentication).await.unwrap().unwrap().id.as_bytes(), SUBJECT.as_bytes());
+    assert_eq!(m.reserve_handle(&login.authentication, HANDLE, &[]).await, Err(Error::Transition));
+    assert_eq!(m.lapse_test(&login.authentication, &raw, std::slice::from_ref(&gate)).await, Err(Error::Policy));
+    m.storage.signal_revocation(SUBJECT).await.unwrap();
+    assert!(m.membership(SUBJECT, now() as u64).await.is_err());
+    let mut authority = verified_policy(&raw, now()).await;
+    authority.bump_epoch().await.unwrap();
+    authority.publish(cplc::SnapshotKind::Settings, now() as u64).await.unwrap();
+    authority.publish(cplc::SnapshotKind::RevocationList, now() as u64).await.unwrap();
+    for event in m.revocations(10).await.unwrap() {
+        m.acknowledge_revocation(&event).await.unwrap();
+    }
+    assert!(!m.storage.revocation_pending(SUBJECT).await.unwrap());
+    assert!(m.membership(SUBJECT, now() as u64).await.is_ok());
 }
 
 #[tokio::test(flavor = "multi_thread")]

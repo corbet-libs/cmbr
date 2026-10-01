@@ -1,3 +1,4 @@
+//! Discoverable membership restore through a real resident software passkey.
 mod common;
 use common::{
     resident::{Resident, strip_prf},

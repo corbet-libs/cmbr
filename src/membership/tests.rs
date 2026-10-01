@@ -63,7 +63,11 @@ async fn committed_passkey_receipt_survives_an_interrupted_registration() {
             cpky::Url::parse(ORIGIN).unwrap(),
             {
                 let mut request = challenge.public_key;
-                request.require_resident_key = false;
+                request
+                    .authenticator_selection
+                    .as_mut()
+                    .unwrap()
+                    .require_resident_key = false;
                 request
             },
             300_000,
@@ -210,7 +214,11 @@ async fn revoked_authentication_cannot_change_pins_or_revoke_the_remaining_key()
             cpky::Url::parse(ORIGIN).unwrap(),
             {
                 let mut request = challenge.public_key;
-                request.require_resident_key = false;
+                request
+                    .authenticator_selection
+                    .as_mut()
+                    .unwrap()
+                    .require_resident_key = false;
                 request
             },
             300000,

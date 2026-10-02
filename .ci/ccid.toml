@@ -1,0 +1,10 @@
+schema = 1
+project = "cmbr"
+
+[checks.native]
+kind = "commands"
+commands = [["bash", ".ci/native-check.sh"]]
+
+[checks.resolve]
+kind = "commands"
+commands = [["bash", ".ci/resolve.sh"]]

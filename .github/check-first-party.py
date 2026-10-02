@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require main declarations and one resolved revision per first-party crate."""
+import os
 import re
 import subprocess
 import sys
@@ -71,7 +72,18 @@ def self_test():
 if __name__ == '__main__':
     self_test()
     if '--self-test' not in sys.argv:
-        paths = subprocess.check_output(['git', 'ls-files', '-z'], text=True).split('\0')
+        if '--archive' in sys.argv:
+            # Authenticated committed archives contain no Git metadata. Include
+            # every nested manifest and lock under the same declaration rules.
+            paths = []
+            for directory, children, files in os.walk('.'):
+                children[:] = [name for name in children if name not in ('.git', 'target')]
+                paths.extend(str(Path(directory) / name) for name in files
+                             if name in ('Cargo.toml', 'Cargo.lock'))
+            if not {'Cargo.toml', 'Cargo.lock'}.issubset(paths):
+                raise ValueError('Missing committed root manifest or lock')
+        else:
+            paths = subprocess.check_output(['git', 'ls-files', '-z'], text=True).split('\0')
         for name in paths:
             path = Path(name)
             if path.name == 'Cargo.toml':

@@ -11,7 +11,7 @@ mod storage;
 
 pub use membership::{
     Config, Lobby, Login, Membership, PendingAdditionalRegistration, PendingLogin,
-    PendingRegistration, Warning,
+    PendingRegistration, RoleLease, Warning,
 };
 pub use storage::{
     DEVICE_KEYS_SCHEMA, DeviceKeyBinding, LibsqlStorage, MemoryStorage, Revocation, SCHEMA, Storage,
@@ -20,7 +20,7 @@ pub use storage::{
 pub use ckyh::{Authentication, Uuid};
 pub use cnrl::{Record, State};
 pub use cpns::server::Pin;
-pub use crgs::{Handle, Member, YearMonth};
+pub use crgs::{Handle, Member, Role, YearMonth};
 
 /// Append these schemas, in this order, to the service's complete migration list.
 /// The root assigns contiguous versions; leaves never migrate independently.

@@ -55,6 +55,28 @@ pub struct Login {
     pub enrolment: Record,
 }
 
+/// Current garden role held under the original member's serialization lease.
+/// Keep this value alive until the authorized garden operation completes.
+/// It is server authority, never a frontend DTO or a profile credential.
+pub struct RoleLease {
+    role: crgs::Role,
+    valid_until: u64,
+    _guard: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl RoleLease {
+    /// The one current role in the original community register.
+    pub fn role(&self) -> crgs::Role {
+        self.role
+    }
+
+    /// Exclusive membership expiry. The garden must also enforce its own
+    /// session deadline and authoritative clock at the operation boundary.
+    pub fn valid_until(&self) -> u64 {
+        self.valid_until
+    }
+}
+
 /// Current lobby response. Warnings are part of the API, not optional UI policy.
 pub struct Lobby {
     /// Pure current enrolment view.
@@ -694,6 +716,80 @@ impl<S: Storage + 'static, L: clbs::Verifier + 'static, C: clbs::Clock + 'static
         .await
     }
 
+    /// Read garden authority from a live passkey and current admitted membership.
+    /// Acquire any outer policy lock before this lease, as credential issuance
+    /// does. Holding the lease prevents demotion, lapse and passkey revocation
+    /// from racing the operation. Ordinary member APIs do not use this privilege.
+    pub async fn role(&self, auth: &Authentication) -> Result<RoleLease> {
+        let guard = crate::storage::member_lock(self.storage.community(), auth.member()).await;
+        let now = self.now()?;
+        let row = self.authenticated(auth, now).await?;
+        let member = self.active_register_member(&row, now).await?;
+        Ok(RoleLease {
+            role: member.role,
+            valid_until: lease_deadline(member.lease_end)?,
+            _guard: guard,
+        })
+    }
+
+    /// Assign the original register role through a current garden actor.
+    /// Admins may assign/remove admins; only roots may assign/remove roots.
+    /// Both memberships are serialized in UUID order through the durable write.
+    /// No role history or public badge is recorded.
+    pub async fn set_role(
+        &self,
+        auth: &Authentication,
+        target: Uuid,
+        role: crgs::Role,
+    ) -> Result<()> {
+        let actor = auth.member();
+        let first = actor.min(target);
+        let second = actor.max(target);
+        let first_guard = crate::storage::member_lock(self.storage.community(), first).await;
+        let second_guard = if first == second {
+            None
+        } else {
+            Some(crate::storage::member_lock(self.storage.community(), second).await)
+        };
+        let m = self.clone();
+        let auth = auth.clone();
+        completing(async move {
+            let _guards = (first_guard, second_guard);
+            let now = m.now()?;
+            let actor_row = m.authenticated(&auth, now).await?;
+            let actor_member = m.active_register_member(&actor_row, now).await?;
+            let target_row = m.live(target, now).await?;
+            let target_member = m.active_register_member(&target_row, now).await?;
+            match actor_member.role {
+                crgs::Role::Root => {}
+                crgs::Role::Admin
+                    if target_member.role != crgs::Role::Root && role != crgs::Role::Root => {}
+                _ => return Err(Error::Policy),
+            }
+            m.register.set_role(&target_row.member_id(), role).await?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn active_register_member(&self, row: &Record, now: i64) -> Result<crgs::Member> {
+        self.check_record(row)?;
+        if row.state() != State::Admitted {
+            return Err(Error::Transition);
+        }
+        let member = self
+            .register
+            .member(&row.member_id())
+            .await?
+            .ok_or(Error::Transition)?;
+        let today = date(now)?;
+        let month = crgs::YearMonth::new(today.year() as u16, today.month() as u8)?;
+        if member.handle.is_none() || member.lease_end < month {
+            return Err(Error::Transition);
+        }
+        Ok(member)
+    }
+
     /// Return the canonical reserved or admitted handle for the lobby.
     pub async fn handle(&self, auth: &Authentication) -> Result<Option<crgs::Handle>> {
         async {
@@ -1061,6 +1157,19 @@ fn date(now: i64) -> Result<DateTime<Utc>> {
         return Err(Error::InvalidInput);
     }
     Ok(date)
+}
+
+fn lease_deadline(month: crgs::YearMonth) -> Result<u64> {
+    let start = chrono::NaiveDate::from_ymd_opt(month.year().into(), month.month().into(), 1)
+        .ok_or(Error::InvalidInput)?;
+    let end = start
+        .checked_add_months(chrono::Months::new(1))
+        .ok_or(Error::InvalidInput)?;
+    Ok(end
+        .and_hms_opt(0, 0, 0)
+        .ok_or(Error::InvalidInput)?
+        .and_utc()
+        .timestamp() as u64)
 }
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> std::result::Result<T, ckyh::Error> + Send + 'static,

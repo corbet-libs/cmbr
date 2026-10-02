@@ -6,6 +6,18 @@ cmty wires the facades. Leaves own their cryptography, lifecycle transitions and
 atomic writes. Services select trusted storage/verifiers and authenticate routes.
 No raw gate evidence, secrets, login times, request logs or history are retained.
 
+Garden authorization uses `Membership::role` with an actual current passkey.
+It returns an unexportable `RoleLease` over the existing member queue, with the
+original register's one role and exclusive membership expiry. The garden checks
+its session and operation clock and retains this lease through the operation;
+outer policy locks must be acquired first, matching credential issuance order.
+Member APIs and profile credentials do not gain privileges or role badges.
+`set_role` holds actor and target queues in UUID order: admins may assign/remove
+admins, roots may assign/remove roots, and ordinary members may do neither.
+The SQL write completes even if its waiting caller disconnects. Root voucher
+bootstrap is a separate service composition; these APIs create no synthetic
+membership or privileged passkey.
+
 ## Admission and identity
 
 `admit` and `lapse` require cplc's policy owner, opaque `VerifiedSnapshot` and
